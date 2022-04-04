@@ -1,0 +1,4 @@
+imports_granularity = "Item"
+wrap_comments = true
+format_strings = true
+reorder_impl_items = true
