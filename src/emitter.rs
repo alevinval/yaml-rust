@@ -1,7 +1,7 @@
+use crate::yaml::{Hash, Yaml};
 use std::convert::From;
 use std::error::Error;
 use std::fmt::{self, Display};
-use crate::yaml::{Hash, Yaml};
 
 #[derive(Copy, Clone, Debug)]
 pub enum EmitError {
@@ -137,6 +137,12 @@ impl<'a> YamlEmitter<'a> {
         self.emit_node(doc)
     }
 
+    fn emit_line_begin(&mut self) -> EmitResult {
+        writeln!(self.writer)?;
+        self.write_indent()?;
+        Ok(())
+    }
+
     fn write_indent(&mut self) -> EmitResult {
         if self.level <= 0 {
             return Ok(());
@@ -181,8 +187,7 @@ impl<'a> YamlEmitter<'a> {
                 write!(self.writer, "~")?;
                 Ok(())
             }
-            // XXX(chenyh) Alias
-            _ => Ok(()),
+            Yaml::Alias(_) => Ok(()),
         }
     }
 
@@ -193,8 +198,7 @@ impl<'a> YamlEmitter<'a> {
             self.level += 1;
             for (cnt, x) in v.iter().enumerate() {
                 if cnt > 0 {
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                 }
                 write!(self.writer, "-")?;
                 self.emit_val(true, x)?;
@@ -210,19 +214,14 @@ impl<'a> YamlEmitter<'a> {
         } else {
             self.level += 1;
             for (cnt, (k, v)) in h.iter().enumerate() {
-                let complex_key = match *k {
-                    Yaml::Hash(_) | Yaml::Array(_) => true,
-                    _ => false,
-                };
                 if cnt > 0 {
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                 }
+                let complex_key = matches!(*k, Yaml::Hash(_) | Yaml::Array(_));
                 if complex_key {
                     write!(self.writer, "?")?;
                     self.emit_val(true, k)?;
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                     write!(self.writer, ":")?;
                     self.emit_val(true, v)?;
                 } else {
@@ -291,31 +290,33 @@ fn need_quotes(string: &str) -> bool {
         string.starts_with(' ') || string.ends_with(' ')
     }
 
-    string == ""
+    string.is_empty()
         || need_quotes_spaces(string)
-        || string.starts_with(|character: char| match character {
-            '&' | '*' | '?' | '|' | '-' | '<' | '>' | '=' | '!' | '%' | '@' => true,
-            _ => false,
+        || string.starts_with(|character: char| {
+            matches!(
+                character,
+                '&' | '*' | '?' | '|' | '-' | '<' | '>' | '=' | '!' | '%' | '@'
+            )
         })
-        || string.contains(|character: char| match character {
-            ':'
-            | '{'
-            | '}'
-            | '['
-            | ']'
-            | ','
-            | '#'
-            | '`'
-            | '\"'
-            | '\''
-            | '\\'
-            | '\0'..='\x06'
-            | '\t'
-            | '\n'
-            | '\r'
-            | '\x0e'..='\x1a'
-            | '\x1c'..='\x1f' => true,
-            _ => false,
+        || string.contains(|character: char| {
+            matches!(character, ':'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | ','
+                    | '#'
+                    | '`'
+                    | '\"'
+                    | '\''
+                    | '\\'
+                    | '\0'..='\x06'
+                    | '\t'
+                    | '\n'
+                    | '\r'
+                    | '\x0e'..='\x1a'
+                    | '\x1c'..='\x1f'
+            )
         })
         || [
             // http://yaml.org/type/bool.html
@@ -365,7 +366,7 @@ a4:
         println!("emitted:\n{}", writer);
         let docs_new = match YamlLoader::load_from_str(&writer) {
             Ok(y) => y,
-            Err(e) => panic!(format!("{}", e)),
+            Err(e) => panic!("{}", e),
         };
         let doc_new = &docs_new[0];
 
@@ -402,7 +403,7 @@ products:
         }
         let docs_new = match YamlLoader::load_from_str(&writer) {
             Ok(y) => y,
-            Err(e) => panic!(format!("{}", e)),
+            Err(e) => panic!("{}", e),
         };
         let doc_new = &docs_new[0];
         assert_eq!(doc, doc_new);
@@ -631,5 +632,4 @@ a:
 
         assert_eq!(s, writer);
     }
-
 }

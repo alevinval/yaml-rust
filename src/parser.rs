@@ -67,7 +67,6 @@ pub struct Parser<T> {
     scanner: Scanner<T>,
     states: Vec<State>,
     state: State,
-    marks: Vec<Marker>,
     token: Option<Token>,
     current: Option<(Event, Marker)>,
     anchors: HashMap<String, usize>,
@@ -96,7 +95,6 @@ impl<T: Iterator<Item = char>> Parser<T> {
             scanner: Scanner::new(src),
             states: Vec::new(),
             state: State::StreamStart,
-            marks: Vec::new(),
             token: None,
             current: None,
 
@@ -539,7 +537,6 @@ impl<T: Iterator<Item = char>> Parser<T> {
         // skip BlockMappingStart
         if first {
             let _ = self.peek_token()?;
-            //self.marks.push(tok.0);
             self.skip();
         }
         match *self.peek_token()? {
@@ -689,7 +686,6 @@ impl<T: Iterator<Item = char>> Parser<T> {
         // skip FlowMappingStart
         if first {
             let _ = self.peek_token()?;
-            //self.marks.push(tok.0);
             self.skip();
         }
         match *self.peek_token()? {
@@ -755,7 +751,6 @@ impl<T: Iterator<Item = char>> Parser<T> {
         // BLOCK-SEQUENCE-START
         if first {
             let _ = self.peek_token()?;
-            //self.marks.push(tok.0);
             self.skip();
         }
         match *self.peek_token()? {
