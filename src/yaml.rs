@@ -1,6 +1,11 @@
+use crate::parser::Event;
+use crate::parser::MarkedEventReceiver;
+use crate::parser::Parser;
+use crate::scanner::Marker;
+use crate::scanner::ScanError;
+use crate::scanner::TScalarStyle;
+use crate::scanner::TokenType;
 use linked_hash_map::LinkedHashMap;
-use crate::parser::*;
-use crate::scanner::{Marker, ScanError, TScalarStyle, TokenType};
 use std::collections::BTreeMap;
 use std::f64;
 use std::i64;
@@ -9,8 +14,8 @@ use std::ops::Index;
 use std::string;
 use std::vec;
 
-/// A YAML node is stored as this `Yaml` enumeration, which provides an easy way to
-/// access your YAML document.
+/// A YAML node is stored as this `Yaml` enumeration, which provides an easy way
+/// to access your YAML document.
 ///
 /// # Examples
 ///
@@ -28,7 +33,8 @@ use std::vec;
 #[derive(Clone, PartialEq, PartialOrd, Debug, Eq, Ord, Hash)]
 pub enum Yaml {
     /// Float types are stored as String and parsed on demand.
-    /// Note that f64 does NOT implement Eq trait and can NOT be stored in BTreeMap.
+    /// Note that f64 does NOT implement Eq trait and can NOT be stored in
+    /// BTreeMap.
     Real(string::String),
     /// YAML int is stored as i64.
     Integer(i64),
@@ -46,9 +52,9 @@ pub enum Yaml {
     Alias(usize),
     /// YAML null, e.g. `null` or `~`.
     Null,
-    /// Accessing a nonexistent node via the Index trait returns `BadValue`. This
-    /// simplifies error handling in the calling code. Invalid type conversion also
-    /// returns `BadValue`.
+    /// Accessing a nonexistent node via the Index trait returns `BadValue`.
+    /// This simplifies error handling in the calling code. Invalid type
+    /// conversion also returns `BadValue`.
     BadValue,
 }
 
@@ -234,37 +240,35 @@ pub fn $name(self) -> Option<$t> {
 
 impl Yaml {
     define_as!(as_bool, bool, Boolean);
+
     define_as!(as_i64, i64, Integer);
 
     define_as_ref!(as_str, &str, String);
+
     define_as_ref!(as_hash, &Hash, Hash);
+
     define_as_ref!(as_vec, &Array, Array);
 
     define_into!(into_bool, bool, Boolean);
+
     define_into!(into_i64, i64, Integer);
+
     define_into!(into_string, String, String);
+
     define_into!(into_hash, Hash, Hash);
+
     define_into!(into_vec, Array, Array);
 
     pub fn is_null(&self) -> bool {
-        match *self {
-            Yaml::Null => true,
-            _ => false,
-        }
+        matches!(*self, Yaml::Null)
     }
 
     pub fn is_badvalue(&self) -> bool {
-        match *self {
-            Yaml::BadValue => true,
-            _ => false,
-        }
+        matches!(*self, Yaml::BadValue)
     }
 
     pub fn is_array(&self) -> bool {
-        match *self {
-            Yaml::Array(_) => true,
-            _ => false,
-        }
+        matches!(*self, Yaml::Array(_))
     }
 
     pub fn as_f64(&self) -> Option<f64> {
@@ -287,18 +291,18 @@ impl Yaml {
     // Not implementing FromStr because there is no possibility of Error.
     // This function falls back to Yaml::String if nothing else matches.
     pub fn from_str(v: &str) -> Yaml {
-        if v.starts_with("0x") {
-            if let Ok(i) = i64::from_str_radix(&v[2..], 16) {
+        if let Some(v) = v.strip_prefix("0x") {
+            if let Ok(i) = i64::from_str_radix(v, 16) {
                 return Yaml::Integer(i);
             }
         }
-        if v.starts_with("0o") {
-            if let Ok(i) = i64::from_str_radix(&v[2..], 8) {
+        if let Some(v) = v.strip_prefix("0o") {
+            if let Ok(i) = i64::from_str_radix(v, 8) {
                 return Yaml::Integer(i);
             }
         }
-        if v.starts_with('+') {
-            if let Ok(i) = v[1..].parse::<i64>() {
+        if let Some(v) = v.strip_prefix('+') {
+            if let Ok(i) = v.parse::<i64>() {
                 return Yaml::Integer(i);
             }
         }
@@ -343,12 +347,12 @@ impl Index<usize> for Yaml {
 }
 
 impl IntoIterator for Yaml {
-    type Item = Yaml;
     type IntoIter = YamlIter;
+    type Item = Yaml;
 
     fn into_iter(self) -> Self::IntoIter {
         YamlIter {
-            yaml: self.into_vec().unwrap_or_else(Vec::new).into_iter(),
+            yaml: self.into_vec().unwrap_or_default().into_iter(),
         }
     }
 }
@@ -367,8 +371,8 @@ impl Iterator for YamlIter {
 
 #[cfg(test)]
 mod test {
-    use std::f64;
     use crate::yaml::*;
+    use std::f64;
     #[test]
     fn test_coerce() {
         let s = "---

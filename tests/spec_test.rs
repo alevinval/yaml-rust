@@ -2,7 +2,9 @@
 #![allow(non_upper_case_globals)]
 extern crate yaml_rust;
 
-use yaml_rust::parser::{Event, EventReceiver, Parser};
+use yaml_rust::parser::Event;
+use yaml_rust::parser::EventReceiver;
+use yaml_rust::parser::Parser;
 use yaml_rust::scanner::TScalarStyle;
 
 // These names match the names used in the C++ test suite.
@@ -76,8 +78,11 @@ include!("spec_test.rs.inc");
 
 #[test]
 fn test_mapvec_legal() {
-    use yaml_rust::yaml::{Array, Hash, Yaml};
-    use yaml_rust::{YamlEmitter, YamlLoader};
+    use yaml_rust::yaml::Array;
+    use yaml_rust::yaml::Hash;
+    use yaml_rust::yaml::Yaml;
+    use yaml_rust::YamlEmitter;
+    use yaml_rust::YamlLoader;
 
     // Emitting a `map<map<seq<_>>, _>` should result in legal yaml that
     // we can parse.

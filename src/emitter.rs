@@ -1,7 +1,8 @@
+use crate::yaml::Hash;
+use crate::yaml::Yaml;
 use std::convert::From;
 use std::error::Error;
-use std::fmt::{self, Display};
-use crate::yaml::{Hash, Yaml};
+use std::fmt;
 
 #[derive(Copy, Clone, Debug)]
 pub enum EmitError {
@@ -15,10 +16,10 @@ impl Error for EmitError {
     }
 }
 
-impl Display for EmitError {
+impl fmt::Display for EmitError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            EmitError::FmtError(ref err) => Display::fmt(err, formatter),
+            EmitError::FmtError(ref err) => fmt::Display::fmt(err, formatter),
             EmitError::BadHashmapKey => formatter.write_str("bad hashmap key"),
         }
     }
@@ -137,6 +138,12 @@ impl<'a> YamlEmitter<'a> {
         self.emit_node(doc)
     }
 
+    fn emit_line_begin(&mut self) -> EmitResult {
+        writeln!(self.writer)?;
+        self.write_indent()?;
+        Ok(())
+    }
+
     fn write_indent(&mut self) -> EmitResult {
         if self.level <= 0 {
             return Ok(());
@@ -181,8 +188,7 @@ impl<'a> YamlEmitter<'a> {
                 write!(self.writer, "~")?;
                 Ok(())
             }
-            // XXX(chenyh) Alias
-            _ => Ok(()),
+            Yaml::Alias(_) => Ok(()),
         }
     }
 
@@ -193,8 +199,7 @@ impl<'a> YamlEmitter<'a> {
             self.level += 1;
             for (cnt, x) in v.iter().enumerate() {
                 if cnt > 0 {
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                 }
                 write!(self.writer, "-")?;
                 self.emit_val(true, x)?;
@@ -210,19 +215,14 @@ impl<'a> YamlEmitter<'a> {
         } else {
             self.level += 1;
             for (cnt, (k, v)) in h.iter().enumerate() {
-                let complex_key = match *k {
-                    Yaml::Hash(_) | Yaml::Array(_) => true,
-                    _ => false,
-                };
                 if cnt > 0 {
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                 }
+                let complex_key = matches!(*k, Yaml::Hash(_) | Yaml::Array(_));
                 if complex_key {
                     write!(self.writer, "?")?;
                     self.emit_val(true, k)?;
-                    writeln!(self.writer)?;
-                    self.write_indent()?;
+                    self.emit_line_begin()?;
                     write!(self.writer, ":")?;
                     self.emit_val(true, v)?;
                 } else {
@@ -278,50 +278,60 @@ impl<'a> YamlEmitter<'a> {
 /// Strings containing any of the following characters must be quoted.
 /// {, }, [, ], ,, #, `
 ///
-/// If the string contains any of the following control characters, it must be escaped with double quotes:
-/// \0, \x01, \x02, \x03, \x04, \x05, \x06, \a, \b, \t, \n, \v, \f, \r, \x0e, \x0f, \x10, \x11, \x12, \x13, \x14, \x15, \x16, \x17, \x18, \x19, \x1a, \e, \x1c, \x1d, \x1e, \x1f, \N, \_, \L, \P
+/// If the string contains any of the following control characters, it must be
+/// escaped with double quotes: \0, \x01, \x02, \x03, \x04, \x05, \x06, \a, \b,
+/// \t, \n, \v, \f, \r, \x0e, \x0f, \x10, \x11, \x12, \x13, \x14, \x15, \x16,
+/// \x17, \x18, \x19, \x1a, \e, \x1c, \x1d, \x1e, \x1f, \N, \_, \L, \P
 ///
-/// Finally, there are other cases when the strings must be quoted, no matter if you're using single or double quotes:
-/// * When the string is true or false (otherwise, it would be treated as a boolean value);
-/// * When the string is null or ~ (otherwise, it would be considered as a null value);
-/// * When the string looks like a number, such as integers (e.g. 2, 14, etc.), floats (e.g. 2.6, 14.9) and exponential numbers (e.g. 12e7, etc.) (otherwise, it would be treated as a numeric value);
-/// * When the string looks like a date (e.g. 2014-12-31) (otherwise it would be automatically converted into a Unix timestamp).
+/// Finally, there are other cases when the strings must be quoted, no matter if
+/// you're using single or double quotes:
+/// * When the string is true or false (otherwise, it would be treated as a
+///   boolean value);
+/// * When the string is null or ~ (otherwise, it would be considered as a null
+///   value);
+/// * When the string looks like a number, such as integers (e.g. 2, 14, etc.),
+///   floats (e.g. 2.6, 14.9) and exponential numbers (e.g. 12e7, etc.)
+///   (otherwise, it would be treated as a numeric value);
+/// * When the string looks like a date (e.g. 2014-12-31) (otherwise it would be
+///   automatically converted into a Unix timestamp).
 fn need_quotes(string: &str) -> bool {
     fn need_quotes_spaces(string: &str) -> bool {
         string.starts_with(' ') || string.ends_with(' ')
     }
 
-    string == ""
+    string.is_empty()
         || need_quotes_spaces(string)
-        || string.starts_with(|character: char| match character {
-            '&' | '*' | '?' | '|' | '-' | '<' | '>' | '=' | '!' | '%' | '@' => true,
-            _ => false,
+        || string.starts_with(|character: char| {
+            matches!(
+                character,
+                '&' | '*' | '?' | '|' | '-' | '<' | '>' | '=' | '!' | '%' | '@'
+            )
         })
-        || string.contains(|character: char| match character {
-            ':'
-            | '{'
-            | '}'
-            | '['
-            | ']'
-            | ','
-            | '#'
-            | '`'
-            | '\"'
-            | '\''
-            | '\\'
-            | '\0'..='\x06'
-            | '\t'
-            | '\n'
-            | '\r'
-            | '\x0e'..='\x1a'
-            | '\x1c'..='\x1f' => true,
-            _ => false,
+        || string.contains(|character: char| {
+            matches!(character, ':'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | ','
+                    | '#'
+                    | '`'
+                    | '\"'
+                    | '\''
+                    | '\\'
+                    | '\0'..='\x06'
+                    | '\t'
+                    | '\n'
+                    | '\r'
+                    | '\x0e'..='\x1a'
+                    | '\x1c'..='\x1f'
+            )
         })
         || [
             // http://yaml.org/type/bool.html
-            // Note: 'y', 'Y', 'n', 'N', is not quoted deliberately, as in libyaml. PyYAML also parse
-            // them as string, not booleans, although it is violating the YAML 1.1 specification.
-            // See https://github.com/dtolnay/serde-yaml/pull/83#discussion_r152628088.
+            // Note: 'y', 'Y', 'n', 'N', is not quoted deliberately, as in libyaml. PyYAML also
+            // parse them as string, not booleans, although it is violating the YAML
+            // 1.1 specification. See https://github.com/dtolnay/serde-yaml/pull/83#discussion_r152628088.
             "yes", "Yes", "YES", "no", "No", "NO", "True", "TRUE", "true", "False", "FALSE",
             "false", "on", "On", "ON", "off", "Off", "OFF",
             // http://yaml.org/type/null.html
@@ -365,7 +375,7 @@ a4:
         println!("emitted:\n{}", writer);
         let docs_new = match YamlLoader::load_from_str(&writer) {
             Ok(y) => y,
-            Err(e) => panic!(format!("{}", e)),
+            Err(e) => panic!("{}", e),
         };
         let doc_new = &docs_new[0];
 
@@ -402,7 +412,7 @@ products:
         }
         let docs_new = match YamlLoader::load_from_str(&writer) {
             Ok(y) => y,
-            Err(e) => panic!(format!("{}", e)),
+            Err(e) => panic!("{}", e),
         };
         let doc_new = &docs_new[0];
         assert_eq!(doc, doc_new);
@@ -631,5 +641,4 @@ a:
 
         assert_eq!(s, writer);
     }
-
 }
