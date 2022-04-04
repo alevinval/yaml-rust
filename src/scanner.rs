@@ -174,39 +174,38 @@ impl<T: Iterator<Item = char>> Iterator for Scanner<T> {
     }
 }
 
-#[inline]
 fn is_z(c: char) -> bool {
     c == '\0'
 }
-#[inline]
+
 fn is_break(c: char) -> bool {
     c == '\n' || c == '\r'
 }
-#[inline]
+
 fn is_breakz(c: char) -> bool {
     is_break(c) || is_z(c)
 }
-#[inline]
+
 fn is_blank(c: char) -> bool {
     c == ' ' || c == '\t'
 }
-#[inline]
+
 fn is_blankz(c: char) -> bool {
     is_blank(c) || is_breakz(c)
 }
-#[inline]
+
 fn is_digit(c: char) -> bool {
     ('0'..='9').contains(&c)
 }
-#[inline]
+
 fn is_alpha(c: char) -> bool {
     matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '-')
 }
-#[inline]
+
 fn is_hex(c: char) -> bool {
     ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
 }
-#[inline]
+
 fn as_hex(c: char) -> u32 {
     match c {
         '0'..='9' => (c as u32) - ('0' as u32),
@@ -215,7 +214,7 @@ fn as_hex(c: char) -> u32 {
         _ => unreachable!(),
     }
 }
-#[inline]
+
 fn is_flow(c: char) -> bool {
     matches!(c, ',' | '[' | ']' | '{' | '}')
 }
@@ -245,12 +244,10 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    #[inline]
     pub fn get_error(&self) -> Option<ScanError> {
         self.error.as_ref().cloned()
     }
 
-    #[inline]
     fn lookahead(&mut self, count: usize) {
         if self.buffer.len() >= count {
             return;
@@ -260,7 +257,6 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    #[inline]
     fn skip(&mut self) {
         let c = self.buffer.pop_front().unwrap();
 
@@ -273,7 +269,6 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    #[inline]
     fn skip_line(&mut self) {
         if self.buffer[0] == '\r' && self.buffer[1] == '\n' {
             self.skip();
@@ -283,38 +278,31 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    #[inline]
     fn ch(&self) -> char {
         self.buffer[0]
     }
 
-    #[inline]
     fn ch_is(&self, c: char) -> bool {
         self.buffer[0] == c
     }
 
     #[allow(dead_code)]
-    #[inline]
     fn eof(&self) -> bool {
         self.ch_is('\0')
     }
 
-    #[inline]
     pub fn stream_started(&self) -> bool {
         self.stream_start_produced
     }
 
-    #[inline]
     pub fn stream_ended(&self) -> bool {
         self.stream_end_produced
     }
 
-    #[inline]
     pub fn mark(&self) -> Marker {
         self.mark
     }
 
-    #[inline]
     fn read_break(&mut self, s: &mut String) {
         if self.buffer[0] == '\r' && self.buffer[1] == '\n' {
             s.push('\n');
@@ -1792,6 +1780,7 @@ mod test {
             assert_eq!($p.next(), None);
         }};
     }
+
     /// test cases in libyaml scanner.c
     #[test]
     fn test_empty() {
