@@ -1,5 +1,10 @@
-use crate::parser::{Event, MarkedEventReceiver, Parser};
-use crate::scanner::{Marker, ScanError, TScalarStyle, TokenType};
+use crate::parser::Event;
+use crate::parser::MarkedEventReceiver;
+use crate::parser::Parser;
+use crate::scanner::Marker;
+use crate::scanner::ScanError;
+use crate::scanner::TScalarStyle;
+use crate::scanner::TokenType;
 use linked_hash_map::LinkedHashMap;
 use std::collections::BTreeMap;
 use std::f64;
@@ -9,8 +14,8 @@ use std::ops::Index;
 use std::string;
 use std::vec;
 
-/// A YAML node is stored as this `Yaml` enumeration, which provides an easy way to
-/// access your YAML document.
+/// A YAML node is stored as this `Yaml` enumeration, which provides an easy way
+/// to access your YAML document.
 ///
 /// # Examples
 ///
@@ -28,7 +33,8 @@ use std::vec;
 #[derive(Clone, PartialEq, PartialOrd, Debug, Eq, Ord, Hash)]
 pub enum Yaml {
     /// Float types are stored as String and parsed on demand.
-    /// Note that f64 does NOT implement Eq trait and can NOT be stored in BTreeMap.
+    /// Note that f64 does NOT implement Eq trait and can NOT be stored in
+    /// BTreeMap.
     Real(string::String),
     /// YAML int is stored as i64.
     Integer(i64),
@@ -46,9 +52,9 @@ pub enum Yaml {
     Alias(usize),
     /// YAML null, e.g. `null` or `~`.
     Null,
-    /// Accessing a nonexistent node via the Index trait returns `BadValue`. This
-    /// simplifies error handling in the calling code. Invalid type conversion also
-    /// returns `BadValue`.
+    /// Accessing a nonexistent node via the Index trait returns `BadValue`.
+    /// This simplifies error handling in the calling code. Invalid type
+    /// conversion also returns `BadValue`.
     BadValue,
 }
 
@@ -234,16 +240,23 @@ pub fn $name(self) -> Option<$t> {
 
 impl Yaml {
     define_as!(as_bool, bool, Boolean);
+
     define_as!(as_i64, i64, Integer);
 
     define_as_ref!(as_str, &str, String);
+
     define_as_ref!(as_hash, &Hash, Hash);
+
     define_as_ref!(as_vec, &Array, Array);
 
     define_into!(into_bool, bool, Boolean);
+
     define_into!(into_i64, i64, Integer);
+
     define_into!(into_string, String, String);
+
     define_into!(into_hash, Hash, Hash);
+
     define_into!(into_vec, Array, Array);
 
     pub fn is_null(&self) -> bool {
@@ -334,8 +347,8 @@ impl Index<usize> for Yaml {
 }
 
 impl IntoIterator for Yaml {
-    type Item = Yaml;
     type IntoIter = YamlIter;
+    type Item = Yaml;
 
     fn into_iter(self) -> Self::IntoIter {
         YamlIter {

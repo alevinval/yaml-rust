@@ -1,6 +1,7 @@
+use std::char;
 use std::collections::VecDeque;
 use std::error::Error;
-use std::{char, fmt};
+use std::fmt;
 
 #[derive(Clone, Copy, PartialEq, Debug, Eq)]
 pub enum TEncoding {
@@ -158,6 +159,7 @@ pub struct Scanner<T> {
 
 impl<T: Iterator<Item = char>> Iterator for Scanner<T> {
     type Item = Token;
+
     fn next(&mut self) -> Option<Token> {
         if self.error.is_some() {
             return None;
@@ -242,6 +244,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             token_available: false,
         }
     }
+
     #[inline]
     pub fn get_error(&self) -> Option<ScanError> {
         self.error.as_ref().cloned()
@@ -256,6 +259,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             self.buffer.push_back(self.rdr.next().unwrap_or('\0'));
         }
     }
+
     #[inline]
     fn skip(&mut self) {
         let c = self.buffer.pop_front().unwrap();
@@ -268,6 +272,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             self.mark.col += 1;
         }
     }
+
     #[inline]
     fn skip_line(&mut self) {
         if self.buffer[0] == '\r' && self.buffer[1] == '\n' {
@@ -277,31 +282,38 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             self.skip();
         }
     }
+
     #[inline]
     fn ch(&self) -> char {
         self.buffer[0]
     }
+
     #[inline]
     fn ch_is(&self, c: char) -> bool {
         self.buffer[0] == c
     }
+
     #[allow(dead_code)]
     #[inline]
     fn eof(&self) -> bool {
         self.ch_is('\0')
     }
+
     #[inline]
     pub fn stream_started(&self) -> bool {
         self.stream_start_produced
     }
+
     #[inline]
     pub fn stream_ended(&self) -> bool {
         self.stream_end_produced
     }
+
     #[inline]
     pub fn mark(&self) -> Marker {
         self.mark
     }
+
     #[inline]
     fn read_break(&mut self, s: &mut String) {
         if self.buffer[0] == '\r' && self.buffer[1] == '\n' {
@@ -315,6 +327,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             unreachable!();
         }
     }
+
     fn insert_token(&mut self, pos: usize, tok: Token) {
         let old_len = self.tokens.len();
         assert!(pos <= old_len);
@@ -323,9 +336,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             self.tokens.swap(old_len - i, old_len - i - 1);
         }
     }
+
     fn allow_simple_key(&mut self) {
         self.simple_key_allowed = true;
     }
+
     fn disallow_simple_key(&mut self) {
         self.simple_key_allowed = false;
     }
@@ -559,7 +574,8 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                     TokenType::TagDirective(String::new(), String::new()),
                 )
                 // return Err(ScanError::new(start_mark,
-                //     "while scanning a directive, found unknown directive name"))
+                //     "while scanning a directive, found unknown directive
+                // name"))
             }
         };
         self.lookahead(1);
@@ -942,7 +958,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                 _ => true,
             }
         {
-            return Err(ScanError::new(start_mark, "while scanning an anchor or alias, did not find expected alphabetic or numeric character"));
+            return Err(ScanError::new(
+                start_mark,
+                "while scanning an anchor or alias, did not find expected alphabetic or numeric \
+                 character",
+            ));
         }
 
         if alias {
@@ -1000,6 +1020,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             .ok_or_else(|| ScanError::new(self.mark, "recursion limit exceeded"))?;
         Ok(())
     }
+
     fn decrease_flow_level(&mut self) {
         if self.flow_level > 0 {
             self.flow_level -= 1;
@@ -1231,8 +1252,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
 
             // Check for a tab character messing the indentation.
             if (*indent == 0 || self.mark.col < *indent) && self.buffer[0] == '\t' {
-                return Err(ScanError::new(self.mark,
-                        "while scanning a block scalar, found a tab character where an indentation space is expected"));
+                return Err(ScanError::new(
+                    self.mark,
+                    "while scanning a block scalar, found a tab character where an indentation \
+                     space is expected",
+                ));
             }
 
             if !is_break(self.ch()) {
@@ -1262,8 +1286,9 @@ impl<T: Iterator<Item = char>> Scanner<T> {
 
         let tok = self.scan_flow_scalar(single)?;
 
-        // From spec: To ensure JSON compatibility, if a key inside a flow mapping is JSON-like,
-        // YAML allows the following value to be specified adjacent to the “:”.
+        // From spec: To ensure JSON compatibility, if a key inside a flow mapping is
+        // JSON-like, YAML allows the following value to be specified adjacent
+        // to the “:”.
         self.adjacent_value_allowed_at = self.mark.index;
 
         self.tokens.push_back(tok);
@@ -1373,8 +1398,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                             let mut value = 0u32;
                             for i in 0..code_length {
                                 if !is_hex(self.buffer[i]) {
-                                    return Err(ScanError::new(start_mark,
-                                        "while parsing a quoted scalar, did not find expected hexadecimal number"));
+                                    return Err(ScanError::new(
+                                        start_mark,
+                                        "while parsing a quoted scalar, did not find expected \
+                                         hexadecimal number",
+                                    ));
                                 }
                                 value = (value << 4) + as_hex(self.buffer[i]);
                             }
@@ -1382,8 +1410,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                             let ch = match char::from_u32(value) {
                                 Some(v) => v,
                                 None => {
-                                    return Err(ScanError::new(start_mark,
-                                        "while parsing a quoted scalar, found invalid Unicode character escape code"));
+                                    return Err(ScanError::new(
+                                        start_mark,
+                                        "while parsing a quoted scalar, found invalid Unicode \
+                                         character escape code",
+                                    ));
                                 }
                             };
                             string.push(ch);
@@ -2081,9 +2112,10 @@ key:
 
     #[test]
     fn test_plain_scalar_starting_with_indicators_in_flow() {
-        // "Plain scalars must not begin with most indicators, as this would cause ambiguity with
-        // other YAML constructs. However, the “:”, “?” and “-” indicators may be used as the first
-        // character if followed by a non-space “safe” character, as this causes no ambiguity."
+        // "Plain scalars must not begin with most indicators, as this would cause
+        // ambiguity with other YAML constructs. However, the “:”, “?” and “-”
+        // indicators may be used as the first character if followed by a
+        // non-space “safe” character, as this causes no ambiguity."
 
         let s = "{a: :b}";
         let mut p = Scanner::new(s.chars());

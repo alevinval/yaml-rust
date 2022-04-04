@@ -6,7 +6,8 @@
 //! # Usage
 //!
 //! This crate is [on github](https://github.com/chyh1990/yaml-rust) and can be
-//! used by adding `yaml-rust` to the dependencies in your project's `Cargo.toml`.
+//! used by adding `yaml-rust` to the dependencies in your project's
+//! `Cargo.toml`.
 //!
 //! ```toml
 //! [dependencies]
@@ -33,7 +34,6 @@
 //! let mut out_str = String::new();
 //! let mut emitter = YamlEmitter::new(&mut out_str);
 //! emitter.dump(doc).unwrap(); // dump the YAML object to a String
-//!
 //! ```
 
 #![doc(html_root_url = "https://docs.rs/yaml-rust/0.4.5")]
@@ -51,10 +51,12 @@ pub mod scanner;
 pub mod yaml;
 
 // reexport key APIs
-pub use crate::emitter::{EmitError, YamlEmitter};
+pub use crate::emitter::EmitError;
+pub use crate::emitter::YamlEmitter;
 pub use crate::parser::Event;
 pub use crate::scanner::ScanError;
-pub use crate::yaml::{Yaml, YamlLoader};
+pub use crate::yaml::Yaml;
+pub use crate::yaml::YamlLoader;
 
 #[cfg(test)]
 mod tests {

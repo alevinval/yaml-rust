@@ -1,6 +1,8 @@
 extern crate yaml_rust;
 
-use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
+use yaml_rust::Yaml;
+use yaml_rust::YamlEmitter;
+use yaml_rust::YamlLoader;
 
 fn roundtrip(original: &Yaml) {
     let mut emitted = String::new();
@@ -66,5 +68,6 @@ fn test_issue133() {
     let mut out_str = String::new();
     YamlEmitter::new(&mut out_str).dump(&doc).unwrap();
     let doc2 = YamlLoader::load_from_str(&out_str).unwrap().pop().unwrap();
-    assert_eq!(doc, doc2); // This failed because the type has changed to a number now
+    assert_eq!(doc, doc2); // This failed because the type has changed to a
+                           // number now
 }

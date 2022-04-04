@@ -152,9 +152,11 @@ impl<T: Iterator<Item = char>> Parser<T> {
         self.token = None;
         //self.peek_token();
     }
+
     fn pop_state(&mut self) {
         self.state = self.states.pop().unwrap()
     }
+
     fn push_state(&mut self, state: State) {
         self.states.push(state);
     }
@@ -604,50 +606,54 @@ impl<T: Iterator<Item = char>> Parser<T> {
             let _ = self.peek_token()?;
             self.skip();
         }
-        let marker: Marker =
-            {
-                match *self.peek_token()? {
-                    Token(mark, TokenType::FlowMappingEnd) => mark,
-                    Token(mark, _) => {
-                        if !first {
-                            match *self.peek_token()? {
-                            Token(_, TokenType::FlowEntry) => self.skip(),
-                            Token(mark, _) => return Err(ScanError::new(mark,
-                                "while parsing a flow mapping, did not find expected ',' or '}'"))
-                        }
-                        }
-
+        let marker: Marker = {
+            match *self.peek_token()? {
+                Token(mark, TokenType::FlowMappingEnd) => mark,
+                Token(mark, _) => {
+                    if !first {
                         match *self.peek_token()? {
-                            Token(_, TokenType::Key) => {
-                                self.skip();
-                                match *self.peek_token()? {
-                                    Token(mark, TokenType::Value)
-                                    | Token(mark, TokenType::FlowEntry)
-                                    | Token(mark, TokenType::FlowMappingEnd) => {
-                                        self.state = State::FlowMappingValue;
-                                        return Ok((Event::empty_scalar(), mark));
-                                    }
-                                    _ => {
-                                        self.push_state(State::FlowMappingValue);
-                                        return self.parse_node(false, false);
-                                    }
+                            Token(_, TokenType::FlowEntry) => self.skip(),
+                            Token(mark, _) => {
+                                return Err(ScanError::new(
+                                    mark,
+                                    "while parsing a flow mapping, did not find expected ',' or \
+                                     '}'",
+                                ))
+                            }
+                        }
+                    }
+
+                    match *self.peek_token()? {
+                        Token(_, TokenType::Key) => {
+                            self.skip();
+                            match *self.peek_token()? {
+                                Token(mark, TokenType::Value)
+                                | Token(mark, TokenType::FlowEntry)
+                                | Token(mark, TokenType::FlowMappingEnd) => {
+                                    self.state = State::FlowMappingValue;
+                                    return Ok((Event::empty_scalar(), mark));
+                                }
+                                _ => {
+                                    self.push_state(State::FlowMappingValue);
+                                    return self.parse_node(false, false);
                                 }
                             }
-                            Token(marker, TokenType::Value) => {
-                                self.state = State::FlowMappingValue;
-                                return Ok((Event::empty_scalar(), marker));
-                            }
-                            Token(_, TokenType::FlowMappingEnd) => (),
-                            _ => {
-                                self.push_state(State::FlowMappingEmptyValue);
-                                return self.parse_node(false, false);
-                            }
                         }
-
-                        mark
+                        Token(marker, TokenType::Value) => {
+                            self.state = State::FlowMappingValue;
+                            return Ok((Event::empty_scalar(), marker));
+                        }
+                        Token(_, TokenType::FlowMappingEnd) => (),
+                        _ => {
+                            self.push_state(State::FlowMappingEmptyValue);
+                            return self.parse_node(false, false);
+                        }
                     }
+
+                    mark
                 }
-            };
+            }
+        };
 
         self.pop_state();
         self.skip();
@@ -826,7 +832,8 @@ impl<T: Iterator<Item = char>> Parser<T> {
 
 #[cfg(test)]
 mod test {
-    use super::{Event, Parser};
+    use super::Event;
+    use super::Parser;
 
     #[test]
     fn test_peek_eq_parse() {
