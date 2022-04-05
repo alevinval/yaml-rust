@@ -92,7 +92,7 @@ pub type ParseResult = Result<(Event, Marker), ScanError>;
 impl<T: Iterator<Item = char>> Parser<T> {
     pub fn new(src: T) -> Parser<T> {
         Parser {
-            scanner: Scanner::new(src),
+            scanner: Scanner::new(src, false),
             states: Vec::new(),
             state: State::StreamStart,
             token: None,
