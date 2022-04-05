@@ -2,6 +2,7 @@ use std::char;
 use std::collections::VecDeque;
 
 pub use self::error::ScanError;
+use self::funcs::*;
 pub use self::marker::Marker;
 use self::types::SimpleKey;
 pub use self::types::TEncoding;
@@ -10,8 +11,11 @@ pub use self::types::Token;
 pub use self::types::TokenType;
 
 mod error;
+mod funcs;
 mod marker;
 mod types;
+
+pub type ScanResult = Result<(), ScanError>;
 
 #[derive(Debug)]
 pub struct Scanner<T> {
@@ -51,53 +55,6 @@ impl<T: Iterator<Item = char>> Iterator for Scanner<T> {
     }
 }
 
-fn is_z(c: char) -> bool {
-    c == '\0'
-}
-
-fn is_break(c: char) -> bool {
-    c == '\n' || c == '\r'
-}
-
-fn is_breakz(c: char) -> bool {
-    is_break(c) || is_z(c)
-}
-
-fn is_blank(c: char) -> bool {
-    c == ' ' || c == '\t'
-}
-
-fn is_blankz(c: char) -> bool {
-    is_blank(c) || is_breakz(c)
-}
-
-fn is_digit(c: char) -> bool {
-    ('0'..='9').contains(&c)
-}
-
-fn is_alpha(c: char) -> bool {
-    matches!(c, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '-')
-}
-
-fn is_hex(c: char) -> bool {
-    ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
-}
-
-fn as_hex(c: char) -> u32 {
-    match c {
-        '0'..='9' => (c as u32) - ('0' as u32),
-        'a'..='f' => (c as u32) - ('a' as u32) + 10,
-        'A'..='F' => (c as u32) - ('A' as u32) + 10,
-        _ => unreachable!(),
-    }
-}
-
-fn is_flow(c: char) -> bool {
-    matches!(c, ',' | '[' | ']' | '{' | '}')
-}
-
-pub type ScanResult = Result<(), ScanError>;
-
 impl<T: Iterator<Item = char>> Scanner<T> {
     /// Creates the YAML tokenizer.
     pub fn new(rdr: T, with_comments: bool) -> Scanner<T> {
@@ -122,8 +79,32 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
+    pub fn get_mark(&self) -> Marker {
+        self.mark
+    }
+
     pub fn get_error(&self) -> Option<ScanError> {
-        self.error.as_ref().cloned()
+        self.error.clone()
+    }
+
+    pub fn is_stream_started(&self) -> bool {
+        self.stream_start_produced
+    }
+
+    pub fn is_stream_finished(&self) -> bool {
+        self.stream_end_produced
+    }
+
+    fn ch(&self) -> char {
+        self.buffer[0]
+    }
+
+    fn allow_simple_key(&mut self) {
+        self.simple_key_allowed = true;
+    }
+
+    fn disallow_simple_key(&mut self) {
+        self.simple_key_allowed = false;
     }
 
     fn lookahead(&mut self, count: usize) {
@@ -136,14 +117,18 @@ impl<T: Iterator<Item = char>> Scanner<T> {
     }
 
     fn skip(&mut self) {
-        let c = self.buffer.pop_front().unwrap();
+        let c = self
+            .buffer
+            .pop_front()
+            .expect("cannot skip: ensure lookahead is called");
 
         self.mark.index += 1;
-        if c == '\n' {
-            self.mark.line += 1;
-            self.mark.col = 0;
-        } else {
-            self.mark.col += 1;
+        match c {
+            '\n' | '\r' => {
+                self.mark.line += 1;
+                self.mark.col = 0;
+            }
+            _ => self.mark.col += 1,
         }
     }
 
@@ -154,26 +139,6 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         } else if is_break(self.buffer[0]) {
             self.skip();
         }
-    }
-
-    fn ch(&self) -> char {
-        self.buffer[0]
-    }
-
-    fn ch_is(&self, c: char) -> bool {
-        self.buffer[0] == c
-    }
-
-    pub fn stream_started(&self) -> bool {
-        self.stream_start_produced
-    }
-
-    pub fn stream_ended(&self) -> bool {
-        self.stream_end_produced
-    }
-
-    pub fn mark(&self) -> Marker {
-        self.mark
     }
 
     fn read_break(&mut self, s: &mut String) {
@@ -198,15 +163,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    fn allow_simple_key(&mut self) {
-        self.simple_key_allowed = true;
-    }
-
-    fn disallow_simple_key(&mut self) {
-        self.simple_key_allowed = false;
-    }
-
-    pub fn fetch_next_token(&mut self) -> ScanResult {
+    fn fetch_next_token(&mut self) -> ScanResult {
         self.lookahead(1);
         // println!("--> fetch_next_token Cur {:?} {:?}", self.mark, self.ch());
 
@@ -224,19 +181,21 @@ impl<T: Iterator<Item = char>> Scanner<T> {
 
         self.lookahead(4);
 
-        if is_z(self.ch()) {
+        let ch = self.buffer[0];
+        if is_z(ch) {
             self.fetch_stream_end()?;
             return Ok(());
         }
 
         // Is it a directive?
-        if self.mark.col == 0 && self.ch_is('%') {
+        if self.mark.col == 0 && ch == '%' {
             return self.fetch_directive();
         }
 
+        let nc = self.buffer[1];
         if self.mark.col == 0
-            && self.buffer[0] == '-'
-            && self.buffer[1] == '-'
+            && ch == '-'
+            && nc == '-'
             && self.buffer[2] == '-'
             && is_blankz(self.buffer[3])
         {
@@ -245,8 +204,8 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
 
         if self.mark.col == 0
-            && self.buffer[0] == '.'
-            && self.buffer[1] == '.'
+            && ch == '.'
+            && nc == '.'
             && self.buffer[2] == '.'
             && is_blankz(self.buffer[3])
         {
@@ -254,9 +213,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             return Ok(());
         }
 
-        let c = self.buffer[0];
-        let nc = self.buffer[1];
-        match c {
+        match ch {
             '[' => self.fetch_flow_collection_start(TokenType::FlowSequenceStart),
             '{' => self.fetch_flow_collection_start(TokenType::FlowMappingStart),
             ']' => self.fetch_flow_collection_end(TokenType::FlowSequenceEnd),
@@ -288,13 +245,13 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             '#' if self.with_comments => self.fetch_comment(),
             '%' | '@' | '`' => Err(ScanError::new(
                 self.mark,
-                &format!("unexpected character: `{}'", c),
+                &format!("unexpected character: `{}'", ch),
             )),
             _ => self.fetch_plain_scalar(),
         }
     }
 
-    pub fn next_token(&mut self) -> Result<Option<Token>, ScanError> {
+    fn next_token(&mut self) -> Result<Option<Token>, ScanError> {
         if self.stream_end_produced {
             return Ok(None);
         }
@@ -302,17 +259,18 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         if !self.token_available {
             self.fetch_more_tokens()?;
         }
-        let t = self.tokens.pop_front().unwrap();
+
+        let token = self.tokens.pop_front().unwrap();
         self.token_available = false;
         self.tokens_parsed += 1;
 
-        if let TokenType::StreamEnd = t.1 {
+        if let TokenType::StreamEnd = token.1 {
             self.stream_end_produced = true;
         }
-        Ok(Some(t))
+        Ok(Some(token))
     }
 
-    pub fn fetch_more_tokens(&mut self) -> ScanResult {
+    fn fetch_more_tokens(&mut self) -> ScanResult {
         let mut need_more;
         loop {
             need_more = false;
@@ -327,7 +285,6 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                     }
                 }
             }
-
             if !need_more {
                 break;
             }
@@ -1623,7 +1580,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
     }
 
     fn fetch_comment(&mut self) -> ScanResult {
-        let mark = self.mark();
+        let mark = self.get_mark();
         let mut comment = String::new();
         let mut comment_started = false;
 
