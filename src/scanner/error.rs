@@ -12,9 +12,9 @@ pub struct ScanError {
 }
 
 impl ScanError {
-    pub fn new(loc: Marker, info: &str) -> ScanError {
+    pub fn new(mark: Marker, info: &str) -> ScanError {
         ScanError {
-            mark: loc,
+            mark,
             info: info.to_owned(),
         }
     }
