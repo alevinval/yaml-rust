@@ -1,142 +1,17 @@
 use std::char;
 use std::collections::VecDeque;
-use std::error::Error;
-use std::fmt;
 
-#[derive(Clone, Copy, PartialEq, Debug, Eq)]
-pub enum TEncoding {
-    Utf8,
-}
+pub use self::error::ScanError;
+pub use self::marker::Marker;
+use self::types::SimpleKey;
+pub use self::types::TEncoding;
+pub use self::types::TScalarStyle;
+pub use self::types::Token;
+pub use self::types::TokenType;
 
-#[derive(Clone, Copy, PartialEq, Debug, Eq)]
-pub enum TScalarStyle {
-    Any,
-    Plain,
-    SingleQuoted,
-    DoubleQuoted,
-
-    Literal,
-    Foled,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug, Eq)]
-pub struct Marker {
-    index: usize,
-    line: usize,
-    col: usize,
-}
-
-impl Marker {
-    fn new(index: usize, line: usize, col: usize) -> Marker {
-        Marker { index, line, col }
-    }
-
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    pub fn line(&self) -> usize {
-        self.line
-    }
-
-    pub fn col(&self) -> usize {
-        self.col
-    }
-}
-
-#[derive(Clone, PartialEq, Debug, Eq)]
-pub struct ScanError {
-    mark: Marker,
-    info: String,
-}
-
-impl ScanError {
-    pub fn new(loc: Marker, info: &str) -> ScanError {
-        ScanError {
-            mark: loc,
-            info: info.to_owned(),
-        }
-    }
-
-    pub fn marker(&self) -> &Marker {
-        &self.mark
-    }
-}
-
-impl Error for ScanError {
-    fn description(&self) -> &str {
-        self.info.as_ref()
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
-}
-
-impl fmt::Display for ScanError {
-    // col starts from 0
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            formatter,
-            "{} at line {} column {}",
-            self.info,
-            self.mark.line,
-            self.mark.col + 1
-        )
-    }
-}
-
-#[derive(Clone, PartialEq, Debug, Eq)]
-pub enum TokenType {
-    NoToken,
-    StreamStart(TEncoding),
-    StreamEnd,
-    /// major, minor
-    VersionDirective(u32, u32),
-    /// handle, prefix
-    TagDirective(String, String),
-    DocumentStart,
-    DocumentEnd,
-    BlockSequenceStart,
-    BlockMappingStart,
-    BlockEnd,
-    FlowSequenceStart,
-    FlowSequenceEnd,
-    FlowMappingStart,
-    FlowMappingEnd,
-    BlockEntry,
-    FlowEntry,
-    Key,
-    Value,
-    Alias(String),
-    Anchor(String),
-    /// handle, suffix
-    Tag(String, String),
-    Scalar(TScalarStyle, String),
-    Comment(String),
-}
-
-#[derive(Clone, PartialEq, Debug, Eq)]
-pub struct Token(pub Marker, pub TokenType);
-
-#[derive(Clone, PartialEq, Debug, Eq)]
-struct SimpleKey {
-    possible: bool,
-    required: bool,
-    token_number: usize,
-    mark: Marker,
-}
-
-impl SimpleKey {
-    fn new(mark: Marker) -> SimpleKey {
-        SimpleKey {
-            possible: false,
-            required: false,
-            token_number: 0,
-            mark,
-        }
-    }
-}
+mod error;
+mod marker;
+mod types;
 
 #[derive(Debug)]
 pub struct Scanner<T> {
