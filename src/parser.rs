@@ -135,7 +135,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
         let token = self.scanner.next();
         match token {
             None => match self.scanner.get_error() {
-                None => Err(ScanError::new(self.scanner.mark(), "unexpected eof")),
+                None => Err(ScanError::new(self.scanner.get_mark(), "unexpected eof")),
                 Some(e) => Err(e),
             },
             Some(tok) => Ok(tok),
@@ -163,7 +163,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
 
     fn parse(&mut self) -> ParseResult {
         if self.state == State::End {
-            return Ok((Event::StreamEnd, self.scanner.mark()));
+            return Ok((Event::StreamEnd, self.scanner.get_mark()));
         }
         let (ev, mark) = self.state_machine()?;
         // println!("EV {:?}", ev);
@@ -175,15 +175,15 @@ impl<T: Iterator<Item = char>> Parser<T> {
         recv: &mut R,
         multi: bool,
     ) -> Result<(), ScanError> {
-        if !self.scanner.stream_started() {
+        if !self.scanner.is_stream_started() {
             let (ev, mark) = self.next()?;
             assert_eq!(ev, Event::StreamStart);
             recv.on_event(ev, mark);
         }
 
-        if self.scanner.stream_ended() {
+        if self.scanner.is_stream_finished() {
             // XXX has parsed?
-            recv.on_event(Event::StreamEnd, self.scanner.mark());
+            recv.on_event(Event::StreamEnd, self.scanner.get_mark());
             return Ok(());
         }
         loop {
@@ -826,7 +826,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
 
     fn flow_sequence_entry_mapping_end(&mut self) -> ParseResult {
         self.state = State::FlowSequenceEntry;
-        Ok((Event::MappingEnd, self.scanner.mark()))
+        Ok((Event::MappingEnd, self.scanner.get_mark()))
     }
 }
 
