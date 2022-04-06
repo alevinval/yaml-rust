@@ -5,6 +5,7 @@ extern crate yaml_rust;
 use yaml_rust::parser::Event;
 use yaml_rust::parser::EventReceiver;
 use yaml_rust::parser::Parser;
+use yaml_rust::scanner::Marker;
 use yaml_rust::scanner::TScalarStyle;
 
 // These names match the names used in the C++ test suite.
@@ -27,7 +28,7 @@ struct YamlChecker {
 }
 
 impl EventReceiver for YamlChecker {
-    fn on_event(&mut self, ev: Event) {
+    fn on_event(&mut self, ev: Event, _mark: Marker) {
         let tev = match ev {
             Event::DocumentStart => TestEvent::OnDocumentStart,
             Event::DocumentEnd => TestEvent::OnDocumentEnd,
@@ -51,8 +52,8 @@ impl EventReceiver for YamlChecker {
 
 fn str_to_test_events(docs: &str) -> Vec<TestEvent> {
     let mut p = YamlChecker { evs: Vec::new() };
-    let mut parser = Parser::new(docs.chars());
-    parser.load(&mut p, true).unwrap();
+    let mut parser = Parser::new(docs.chars(), &mut p);
+    parser.load(true).unwrap();
     p.evs
 }
 
