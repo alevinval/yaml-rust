@@ -1615,7 +1615,9 @@ mod test {
     use super::TokenType::*;
     use super::*;
 
+    // Scans next token, and assert type or values
     macro_rules! next {
+        // Expect a token
         ($it:ident, $expected_token:pat) => {{
             let token = $it.next().unwrap();
             match token.1 {
@@ -1623,6 +1625,7 @@ mod test {
                 _ => panic!("unexpected token: {:?}", token),
             }
         }};
+        // Expect a token with value
         ($it:ident, $expected_token:ident, $expected_value:expr) => {{
             let token = $it.next().unwrap();
             match token.1 {
@@ -1632,9 +1635,7 @@ mod test {
                 _ => panic!("unexpected token: {:?}", token),
             }
         }};
-    }
-
-    macro_rules! next_scalar {
+        // Expect a scalar token with expected scalar value type and value
         ($it:ident, $expected_style:expr, $expected_value:expr) => {{
             let token = $it.next().unwrap();
             match token.1 {
@@ -1720,7 +1721,7 @@ mod test {
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
         next!(p, FlowSequenceStart);
-        next_scalar!(p, TScalarStyle::Plain, "item 1");
+        next!(p, TScalarStyle::Plain, "item 1");
         next!(p, FlowEntry);
         next!(p, Scalar(TScalarStyle::Plain, _));
         next!(p, FlowEntry);
@@ -1748,7 +1749,7 @@ mod test {
         next!(p, FlowEntry);
         next!(p, Comment(_));
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a complex key");
+        next!(p, TScalarStyle::Plain, "a complex key");
         next!(p, Value);
         next!(p, Scalar(TScalarStyle::Plain, _));
         next!(p, FlowEntry);
@@ -1773,26 +1774,26 @@ mod test {
         next!(p, StreamStart(..));
         next!(p, BlockSequenceStart);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 1");
+        next!(p, TScalarStyle::Plain, "item 1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 2");
+        next!(p, TScalarStyle::Plain, "item 2");
         next!(p, BlockEntry);
         next!(p, BlockSequenceStart);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 3.1");
+        next!(p, TScalarStyle::Plain, "item 3.1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 3.2");
+        next!(p, TScalarStyle::Plain, "item 3.2");
         next!(p, BlockEnd);
         next!(p, BlockEntry);
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 1");
+        next!(p, TScalarStyle::Plain, "key 1");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 1");
+        next!(p, TScalarStyle::Plain, "value 1");
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 2");
+        next!(p, TScalarStyle::Plain, "key 2");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 2");
+        next!(p, TScalarStyle::Plain, "value 2");
         next!(p, BlockEnd);
         next!(p, BlockEnd);
         next!(p, StreamEnd);
@@ -1862,12 +1863,12 @@ key:
         next!(p, StreamStart(..));
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key");
+        next!(p, TScalarStyle::Plain, "key");
         next!(p, Value);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 1");
+        next!(p, TScalarStyle::Plain, "item 1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 2");
+        next!(p, TScalarStyle::Plain, "item 2");
         next!(p, BlockEnd);
         next!(p, StreamEnd);
         end!(p);
@@ -1889,27 +1890,27 @@ key:
         next!(p, BlockEntry);
         next!(p, BlockSequenceStart);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 1");
+        next!(p, TScalarStyle::Plain, "item 1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 2");
+        next!(p, TScalarStyle::Plain, "item 2");
         next!(p, BlockEnd);
         next!(p, BlockEntry);
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 1");
+        next!(p, TScalarStyle::Plain, "key 1");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 1");
+        next!(p, TScalarStyle::Plain, "value 1");
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 2");
+        next!(p, TScalarStyle::Plain, "key 2");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 2");
+        next!(p, TScalarStyle::Plain, "value 2");
         next!(p, BlockEnd);
         next!(p, BlockEntry);
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "complex key");
+        next!(p, TScalarStyle::Plain, "complex key");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "complex value");
+        next!(p, TScalarStyle::Plain, "complex value");
         next!(p, BlockEnd);
         next!(p, BlockEnd);
         next!(p, StreamEnd);
@@ -1930,26 +1931,26 @@ key:
         next!(p, StreamStart(..));
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a sequence");
+        next!(p, TScalarStyle::Plain, "a sequence");
         next!(p, Value);
         next!(p, BlockSequenceStart);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 1");
+        next!(p, TScalarStyle::Plain, "item 1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "item 2");
+        next!(p, TScalarStyle::Plain, "item 2");
         next!(p, BlockEnd);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a mapping");
+        next!(p, TScalarStyle::Plain, "a mapping");
         next!(p, Value);
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 1");
+        next!(p, TScalarStyle::Plain, "key 1");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 1");
+        next!(p, TScalarStyle::Plain, "value 1");
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "key 2");
+        next!(p, TScalarStyle::Plain, "key 2");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "value 2");
+        next!(p, TScalarStyle::Plain, "value 2");
         next!(p, BlockEnd);
         next!(p, BlockEnd);
         next!(p, StreamEnd);
@@ -1968,11 +1969,11 @@ key:
         next!(p, StreamStart(..));
         next!(p, FlowMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "foo");
+        next!(p, TScalarStyle::Plain, "foo");
         next!(p, Value);
         next!(p, FlowEntry);
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "bar");
+        next!(p, TScalarStyle::Plain, "bar");
         next!(p, FlowEntry);
         next!(p, FlowMappingEnd);
         next!(p, StreamEnd);
@@ -1991,9 +1992,9 @@ key:
         next!(p, StreamStart(..));
         next!(p, FlowMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a");
+        next!(p, TScalarStyle::Plain, "a");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, ":b");
+        next!(p, TScalarStyle::Plain, ":b");
         next!(p, FlowMappingEnd);
         next!(p, StreamEnd);
         end!(p);
@@ -2003,9 +2004,9 @@ key:
         next!(p, StreamStart(..));
         next!(p, FlowMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a");
+        next!(p, TScalarStyle::Plain, "a");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::Plain, "?b");
+        next!(p, TScalarStyle::Plain, "?b");
         next!(p, FlowMappingEnd);
         next!(p, StreamEnd);
         end!(p);
@@ -2016,14 +2017,14 @@ key:
         let s = ":a";
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
-        next_scalar!(p, TScalarStyle::Plain, ":a");
+        next!(p, TScalarStyle::Plain, ":a");
         next!(p, StreamEnd);
         end!(p);
 
         let s = "?a";
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
-        next_scalar!(p, TScalarStyle::Plain, "?a");
+        next!(p, TScalarStyle::Plain, "?a");
         next!(p, StreamEnd);
         end!(p);
     }
@@ -2033,14 +2034,14 @@ key:
         let s = "a:,b";
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
-        next_scalar!(p, TScalarStyle::Plain, "a:,b");
+        next!(p, TScalarStyle::Plain, "a:,b");
         next!(p, StreamEnd);
         end!(p);
 
         let s = ":,b";
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
-        next_scalar!(p, TScalarStyle::Plain, ":,b");
+        next!(p, TScalarStyle::Plain, ":,b");
         next!(p, StreamEnd);
         end!(p);
     }
@@ -2053,9 +2054,9 @@ key:
         next!(p, DocumentStart);
         next!(p, BlockSequenceStart);
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "tok1");
+        next!(p, TScalarStyle::Plain, "tok1");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "tok2");
+        next!(p, TScalarStyle::Plain, "tok2");
         next!(p, BlockEnd);
         next!(p, StreamEnd);
         end!(p);
@@ -2084,15 +2085,15 @@ a0 bb: \"#trickyval\" #'comment e
         next!(p, Comment, "Comment D");
         next!(p, BlockMappingStart);
         next!(p, Key);
-        next_scalar!(p, TScalarStyle::Plain, "a0 bb");
+        next!(p, TScalarStyle::Plain, "a0 bb");
         next!(p, Value);
-        next_scalar!(p, TScalarStyle::DoubleQuoted, "#trickyval");
+        next!(p, TScalarStyle::DoubleQuoted, "#trickyval");
         next!(p, Comment, "'comment e");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "some value 1");
+        next!(p, TScalarStyle::Plain, "some value 1");
         next!(p, Comment, "interleaved comment");
         next!(p, BlockEntry);
-        next_scalar!(p, TScalarStyle::Plain, "some value 2");
+        next!(p, TScalarStyle::Plain, "some value 2");
         next!(p, Comment, "block-end-comment");
         next!(p, BlockEnd);
         next!(p, StreamEnd);
