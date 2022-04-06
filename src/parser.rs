@@ -1,69 +1,22 @@
-use crate::scanner::*;
+use self::event::empty_scalar;
+use self::event::empty_scalar_with_anchor;
+pub use self::event::Event;
+use self::state::State;
+use crate::scanner::Marker;
+use crate::scanner::ScanError;
+use crate::scanner::Scanner;
+use crate::scanner::Token;
+use crate::scanner::TokenType;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Debug, Eq)]
-enum State {
-    StreamStart,
-    ImplicitDocumentStart,
-    DocumentStart,
-    DocumentContent,
-    DocumentEnd,
-    BlockNode,
-    // BlockNodeOrIndentlessSequence,
-    // FlowNode,
-    BlockSequenceFirstEntry,
-    BlockSequenceEntry,
-    IndentlessSequenceEntry,
-    BlockMappingFirstKey,
-    BlockMappingKey,
-    BlockMappingValue,
-    FlowSequenceFirstEntry,
-    FlowSequenceEntry,
-    FlowSequenceEntryMappingKey,
-    FlowSequenceEntryMappingValue,
-    FlowSequenceEntryMappingEnd,
-    FlowMappingFirstKey,
-    FlowMappingKey,
-    FlowMappingValue,
-    FlowMappingEmptyValue,
-    End,
-}
+mod event;
+mod state;
 
-/// `Event` is used with the low-level event base parsing API,
-/// see `EventReceiver` trait.
-#[derive(Clone, PartialEq, Debug, Eq)]
-pub enum Event {
-    /// Reserved for internal use
-    Nothing,
-    StreamStart,
-    StreamEnd,
-    DocumentStart,
-    DocumentEnd,
-    /// Refer to an anchor ID
-    Alias(usize),
-    /// Value, style, anchor_id, tag
-    Scalar(String, TScalarStyle, usize, Option<TokenType>),
-    /// Anchor ID
-    SequenceStart(usize),
-    SequenceEnd,
-    /// Anchor ID
-    MappingStart(usize),
-    MappingEnd,
-}
-
-impl Event {
-    fn empty_scalar() -> Event {
-        // a null scalar
-        Event::Scalar("~".to_owned(), TScalarStyle::Plain, 0, None)
-    }
-
-    fn empty_scalar_with_anchor(anchor: usize, tag: Option<TokenType>) -> Event {
-        Event::Scalar("".to_owned(), TScalarStyle::Plain, anchor, tag)
-    }
-}
+pub type ParseResult = Result<(Event, Marker), ScanError>;
 
 #[derive(Debug)]
-pub struct Parser<T> {
+pub struct Parser<'re, T, R> {
+    recv: &'re mut R,
     scanner: Scanner<T>,
     states: Vec<State>,
     state: State,
@@ -74,24 +27,13 @@ pub struct Parser<T> {
 }
 
 pub trait EventReceiver {
-    fn on_event(&mut self, ev: Event);
+    fn on_event(&mut self, ev: Event, mark: Marker);
 }
 
-pub trait MarkedEventReceiver {
-    fn on_event(&mut self, ev: Event, _mark: Marker);
-}
-
-impl<R: EventReceiver> MarkedEventReceiver for R {
-    fn on_event(&mut self, ev: Event, _mark: Marker) {
-        self.on_event(ev)
-    }
-}
-
-pub type ParseResult = Result<(Event, Marker), ScanError>;
-
-impl<T: Iterator<Item = char>> Parser<T> {
-    pub fn new(src: T) -> Parser<T> {
+impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
+    pub fn new(src: T, recv: &'re mut R) -> Parser<T, R> {
         Parser {
+            recv,
             scanner: Scanner::new(src, false),
             states: Vec::new(),
             state: State::StreamStart,
@@ -104,31 +46,22 @@ impl<T: Iterator<Item = char>> Parser<T> {
         }
     }
 
-    pub fn peek(&mut self) -> Result<&(Event, Marker), ScanError> {
-        match self.current {
-            Some(ref x) => Ok(x),
-            None => {
-                self.current = Some(self.next()?);
-                self.peek()
-            }
-        }
-    }
-
-    pub fn next(&mut self) -> ParseResult {
+    fn next(&mut self) -> ParseResult {
         match self.current {
             None => self.parse(),
             Some(_) => Ok(self.current.take().unwrap()),
         }
     }
 
+    fn emit(&mut self, event: Event, mark: Marker) {
+        self.recv.on_event(event, mark);
+    }
+
     fn peek_token(&mut self) -> Result<&Token, ScanError> {
-        match self.token {
-            None => {
-                self.token = Some(self.scan_next_token()?);
-                Ok(self.token.as_ref().unwrap())
-            }
-            Some(ref tok) => Ok(tok),
+        if self.token.is_none() {
+            self.token = Some(self.scan_next_token()?)
         }
+        Ok(self.token.as_ref().unwrap())
     }
 
     fn scan_next_token(&mut self) -> Result<Token, ScanError> {
@@ -162,39 +95,33 @@ impl<T: Iterator<Item = char>> Parser<T> {
     }
 
     fn parse(&mut self) -> ParseResult {
-        if self.state == State::End {
-            return Ok((Event::StreamEnd, self.scanner.get_mark()));
+        match self.state {
+            State::End => Ok((Event::StreamEnd, self.scanner.get_mark())),
+            _ => Ok(self.state_machine()?),
         }
-        let (ev, mark) = self.state_machine()?;
-        // println!("EV {:?}", ev);
-        Ok((ev, mark))
     }
 
-    pub fn load<R: MarkedEventReceiver>(
-        &mut self,
-        recv: &mut R,
-        multi: bool,
-    ) -> Result<(), ScanError> {
+    pub fn load(&mut self, multi: bool) -> Result<(), ScanError> {
         if !self.scanner.is_stream_started() {
             let (ev, mark) = self.next()?;
             assert_eq!(ev, Event::StreamStart);
-            recv.on_event(ev, mark);
+            self.emit(ev, mark);
         }
 
         if self.scanner.is_stream_finished() {
             // XXX has parsed?
-            recv.on_event(Event::StreamEnd, self.scanner.get_mark());
+            self.emit(Event::StreamEnd, self.scanner.get_mark());
             return Ok(());
         }
         loop {
             let (ev, mark) = self.next()?;
             if ev == Event::StreamEnd {
-                recv.on_event(ev, mark);
+                self.emit(ev, mark);
                 return Ok(());
             }
             // clear anchors before a new document
             self.anchors.clear();
-            self.load_document(ev, mark, recv)?;
+            self.load_document(ev, mark)?;
             if !multi {
                 break;
             }
@@ -202,82 +129,66 @@ impl<T: Iterator<Item = char>> Parser<T> {
         Ok(())
     }
 
-    fn load_document<R: MarkedEventReceiver>(
-        &mut self,
-        first_ev: Event,
-        mark: Marker,
-        recv: &mut R,
-    ) -> Result<(), ScanError> {
-        assert_eq!(first_ev, Event::DocumentStart);
-        recv.on_event(first_ev, mark);
+    fn load_document(&mut self, ev: Event, mark: Marker) -> Result<(), ScanError> {
+        assert_eq!(ev, Event::DocumentStart);
+        self.emit(ev, mark);
 
         let (ev, mark) = self.next()?;
-        self.load_node(ev, mark, recv)?;
+        self.load_node(ev, mark)?;
 
         // DOCUMENT-END is expected.
         let (ev, mark) = self.next()?;
         assert_eq!(ev, Event::DocumentEnd);
-        recv.on_event(ev, mark);
+        self.emit(ev, mark);
 
         Ok(())
     }
 
-    fn load_node<R: MarkedEventReceiver>(
-        &mut self,
-        first_ev: Event,
-        mark: Marker,
-        recv: &mut R,
-    ) -> Result<(), ScanError> {
-        match first_ev {
+    fn load_node(&mut self, ev: Event, mark: Marker) -> Result<(), ScanError> {
+        match ev {
             Event::Alias(..) | Event::Scalar(..) => {
-                recv.on_event(first_ev, mark);
+                self.emit(ev, mark);
                 Ok(())
             }
             Event::SequenceStart(_) => {
-                recv.on_event(first_ev, mark);
-                self.load_sequence(recv)
+                self.emit(ev, mark);
+                self.load_sequence()
             }
             Event::MappingStart(_) => {
-                recv.on_event(first_ev, mark);
-                self.load_mapping(recv)
+                self.emit(ev, mark);
+                self.load_mapping()
             }
             _ => {
-                println!("UNREACHABLE EVENT: {:?}", first_ev);
+                println!("UNREACHABLE EVENT: {:?}", ev);
                 unreachable!();
             }
         }
     }
 
-    fn load_mapping<R: MarkedEventReceiver>(&mut self, recv: &mut R) -> Result<(), ScanError> {
+    fn load_mapping(&mut self) -> Result<(), ScanError> {
         let (mut key_ev, mut key_mark) = self.next()?;
         while key_ev != Event::MappingEnd {
             // key
-            self.load_node(key_ev, key_mark, recv)?;
+            self.load_node(key_ev, key_mark)?;
 
             // value
-            let (ev, mark) = self.next()?;
-            self.load_node(ev, mark, recv)?;
+            let (val_ev, val_mark) = self.next()?;
+            self.load_node(val_ev, val_mark)?;
 
             // next event
-            let (ev, mark) = self.next()?;
-            key_ev = ev;
-            key_mark = mark;
+            (key_ev, key_mark) = self.next()?;
         }
-        recv.on_event(key_ev, key_mark);
+        self.emit(key_ev, key_mark);
         Ok(())
     }
 
-    fn load_sequence<R: MarkedEventReceiver>(&mut self, recv: &mut R) -> Result<(), ScanError> {
+    fn load_sequence(&mut self) -> Result<(), ScanError> {
         let (mut ev, mut mark) = self.next()?;
         while ev != Event::SequenceEnd {
-            self.load_node(ev, mark, recv)?;
-
-            // next event
-            let (next_ev, next_mark) = self.next()?;
-            ev = next_ev;
-            mark = next_mark;
+            self.load_node(ev, mark)?;
+            (ev, mark) = self.next()?;
         }
-        recv.on_event(ev, mark);
+        self.emit(ev, mark);
         Ok(())
     }
 
@@ -410,7 +321,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             | Token(mark, TokenType::StreamEnd) => {
                 self.pop_state();
                 // empty scalar
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
             _ => self.parse_node(true, false),
         }
@@ -447,7 +358,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
     fn parse_node(&mut self, block: bool, indentless_sequence: bool) -> ParseResult {
         let mut anchor_id = 0;
         let mut tag = None;
-        match *self.peek_token()? {
+        match self.peek_token()? {
             Token(_, TokenType::Alias(_)) => {
                 self.pop_state();
                 if let Token(mark, TokenType::Alias(name)) = self.fetch_token() {
@@ -526,7 +437,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             // ex 7.2, an empty scalar can follow a secondary tag
             Token(mark, _) if tag.is_some() || anchor_id > 0 => {
                 self.pop_state();
-                Ok((Event::empty_scalar_with_anchor(anchor_id, tag), mark))
+                Ok((empty_scalar_with_anchor(anchor_id, tag), mark))
             }
             Token(mark, _) => Err(ScanError::new(
                 mark,
@@ -550,7 +461,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                     | Token(mark, TokenType::BlockEnd) => {
                         self.state = State::BlockMappingValue;
                         // empty scalar
-                        Ok((Event::empty_scalar(), mark))
+                        Ok((empty_scalar(), mark))
                     }
                     _ => {
                         self.push_state(State::BlockMappingValue);
@@ -561,7 +472,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             // XXX(chenyh): libyaml failed to parse spec 1.2, ex8.18
             Token(mark, TokenType::Value) => {
                 self.state = State::BlockMappingValue;
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
             Token(mark, TokenType::BlockEnd) => {
                 self.pop_state();
@@ -585,7 +496,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                     | Token(mark, TokenType::BlockEnd) => {
                         self.state = State::BlockMappingKey;
                         // empty scalar
-                        Ok((Event::empty_scalar(), mark))
+                        Ok((empty_scalar(), mark))
                     }
                     _ => {
                         self.push_state(State::BlockMappingKey);
@@ -596,7 +507,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             Token(mark, _) => {
                 self.state = State::BlockMappingKey;
                 // empty scalar
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
         }
     }
@@ -631,7 +542,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                                 | Token(mark, TokenType::FlowEntry)
                                 | Token(mark, TokenType::FlowMappingEnd) => {
                                     self.state = State::FlowMappingValue;
-                                    return Ok((Event::empty_scalar(), mark));
+                                    return Ok((empty_scalar(), mark));
                                 }
                                 _ => {
                                     self.push_state(State::FlowMappingValue);
@@ -641,7 +552,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                         }
                         Token(marker, TokenType::Value) => {
                             self.state = State::FlowMappingValue;
-                            return Ok((Event::empty_scalar(), marker));
+                            return Ok((empty_scalar(), marker));
                         }
                         Token(_, TokenType::FlowMappingEnd) => (),
                         _ => {
@@ -665,7 +576,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             if empty {
                 let Token(mark, _) = *self.peek_token()?;
                 self.state = State::FlowMappingKey;
-                return Ok((Event::empty_scalar(), mark));
+                return Ok((empty_scalar(), mark));
             } else {
                 match *self.peek_token()? {
                     Token(marker, TokenType::Value) => {
@@ -685,7 +596,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
         };
 
         self.state = State::FlowMappingKey;
-        Ok((Event::empty_scalar(), mark))
+        Ok((empty_scalar(), mark))
     }
 
     fn flow_sequence_entry(&mut self, first: bool) -> ParseResult {
@@ -744,7 +655,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             | Token(mark, TokenType::Value)
             | Token(mark, TokenType::BlockEnd) => {
                 self.state = State::IndentlessSequenceEntry;
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
             _ => {
                 self.push_state(State::IndentlessSequenceEntry);
@@ -770,7 +681,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                 match *self.peek_token()? {
                     Token(mark, TokenType::BlockEntry) | Token(mark, TokenType::BlockEnd) => {
                         self.state = State::BlockSequenceEntry;
-                        Ok((Event::empty_scalar(), mark))
+                        Ok((empty_scalar(), mark))
                     }
                     _ => {
                         self.push_state(State::BlockSequenceEntry);
@@ -792,7 +703,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             | Token(mark, TokenType::FlowSequenceEnd) => {
                 self.skip();
                 self.state = State::FlowSequenceEntryMappingValue;
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
             _ => {
                 self.push_state(State::FlowSequenceEntryMappingValue);
@@ -809,7 +720,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
                 match *self.peek_token()? {
                     Token(mark, TokenType::FlowEntry) | Token(mark, TokenType::FlowSequenceEnd) => {
                         self.state = State::FlowSequenceEntryMappingEnd;
-                        Ok((Event::empty_scalar(), mark))
+                        Ok((empty_scalar(), mark))
                     }
                     _ => {
                         self.push_state(State::FlowSequenceEntryMappingEnd);
@@ -819,7 +730,7 @@ impl<T: Iterator<Item = char>> Parser<T> {
             }
             Token(mark, _) => {
                 self.state = State::FlowSequenceEntryMappingEnd;
-                Ok((Event::empty_scalar(), mark))
+                Ok((empty_scalar(), mark))
             }
         }
     }
@@ -831,9 +742,31 @@ impl<T: Iterator<Item = char>> Parser<T> {
 }
 
 #[cfg(test)]
+impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
+    fn peek(&mut self) -> Result<&(Event, Marker), ScanError> {
+        match self.current {
+            Some(ref x) => Ok(x),
+            None => {
+                self.current = Some(self.next()?);
+                self.peek()
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod test {
     use super::Event;
+    use super::EventReceiver;
     use super::Parser;
+
+    struct NoOpRecv {}
+
+    impl EventReceiver for NoOpRecv {
+        fn on_event(&mut self, ev: Event, mark: crate::scanner::Marker) {
+            println!("received event: {:?} at {:?}", ev, mark)
+        }
+    }
 
     #[test]
     fn test_peek_eq_parse() {
@@ -849,7 +782,8 @@ a4:
     - 2
 a5: *x
 ";
-        let mut p = Parser::new(s.chars());
+        let mut recv = NoOpRecv {};
+        let mut p = Parser::new(s.chars(), &mut recv);
         while {
             let event_peek = p.peek().unwrap().clone();
             let event = p.next().unwrap();

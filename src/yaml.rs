@@ -1,5 +1,5 @@
 use crate::parser::Event;
-use crate::parser::MarkedEventReceiver;
+use crate::parser::EventReceiver;
 use crate::parser::Parser;
 use crate::scanner::Marker;
 use crate::scanner::ScanError;
@@ -81,9 +81,10 @@ pub struct YamlLoader {
     anchor_map: BTreeMap<usize, Yaml>,
 }
 
-impl MarkedEventReceiver for YamlLoader {
-    fn on_event(&mut self, ev: Event, _: Marker) {
-        // println!("EV {:?}", ev);
+impl EventReceiver for YamlLoader {
+    fn on_event(&mut self, ev: Event, _marker: Marker) {
+        #[cfg(test)]
+        println!("EV {:?} @ {:?}", ev, _marker);
         match ev {
             Event::DocumentStart => {
                 // do nothing
@@ -199,8 +200,8 @@ impl YamlLoader {
             key_stack: Vec::new(),
             anchor_map: BTreeMap::new(),
         };
-        let mut parser = Parser::new(source.chars());
-        parser.load(&mut loader, true)?;
+        let mut parser = Parser::new(source.chars(), &mut loader);
+        parser.load(true)?;
         Ok(loader.docs)
     }
 }
