@@ -82,8 +82,9 @@ pub struct YamlLoader {
 }
 
 impl EventReceiver for YamlLoader {
-    fn on_event(&mut self, ev: Event, _: Marker) {
-        // println!("EV {:?}", ev);
+    fn on_event(&mut self, ev: Event, _marker: Marker) {
+        #[cfg(test)]
+        println!("EV {:?} @ {:?}", ev, _marker);
         match ev {
             Event::DocumentStart => {
                 // do nothing

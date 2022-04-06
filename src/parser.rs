@@ -96,21 +96,15 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
         }
     }
 
-    pub fn peek(&mut self) -> Result<&(Event, Marker), ScanError> {
-        match self.current {
-            Some(ref x) => Ok(x),
-            None => {
-                self.current = Some(self.next()?);
-                self.peek()
-            }
-        }
-    }
-
-    pub fn next(&mut self) -> ParseResult {
+    fn next(&mut self) -> ParseResult {
         match self.current {
             None => self.parse(),
             Some(_) => Ok(self.current.take().unwrap()),
         }
+    }
+
+    fn emit(&mut self, event: Event, mark: Marker) {
+        self.recv.on_event(event, mark);
     }
 
     fn peek_token(&mut self) -> Result<&Token, ScanError> {
@@ -166,19 +160,18 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
         if !self.scanner.is_stream_started() {
             let (ev, mark) = self.next()?;
             assert_eq!(ev, Event::StreamStart);
-            self.recv.on_event(ev, mark);
+            self.emit(ev, mark);
         }
 
         if self.scanner.is_stream_finished() {
             // XXX has parsed?
-            self.recv
-                .on_event(Event::StreamEnd, self.scanner.get_mark());
+            self.emit(Event::StreamEnd, self.scanner.get_mark());
             return Ok(());
         }
         loop {
             let (ev, mark) = self.next()?;
             if ev == Event::StreamEnd {
-                self.recv.on_event(ev, mark);
+                self.emit(ev, mark);
                 return Ok(());
             }
             // clear anchors before a new document
@@ -191,9 +184,9 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
         Ok(())
     }
 
-    fn load_document(&mut self, first_ev: Event, mark: Marker) -> Result<(), ScanError> {
-        assert_eq!(first_ev, Event::DocumentStart);
-        self.recv.on_event(first_ev, mark);
+    fn load_document(&mut self, ev: Event, mark: Marker) -> Result<(), ScanError> {
+        assert_eq!(ev, Event::DocumentStart);
+        self.emit(ev, mark);
 
         let (ev, mark) = self.next()?;
         self.load_node(ev, mark)?;
@@ -201,27 +194,27 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
         // DOCUMENT-END is expected.
         let (ev, mark) = self.next()?;
         assert_eq!(ev, Event::DocumentEnd);
-        self.recv.on_event(ev, mark);
+        self.emit(ev, mark);
 
         Ok(())
     }
 
-    fn load_node(&mut self, first_ev: Event, mark: Marker) -> Result<(), ScanError> {
-        match first_ev {
+    fn load_node(&mut self, ev: Event, mark: Marker) -> Result<(), ScanError> {
+        match ev {
             Event::Alias(..) | Event::Scalar(..) => {
-                self.recv.on_event(first_ev, mark);
+                self.emit(ev, mark);
                 Ok(())
             }
             Event::SequenceStart(_) => {
-                self.recv.on_event(first_ev, mark);
+                self.emit(ev, mark);
                 self.load_sequence()
             }
             Event::MappingStart(_) => {
-                self.recv.on_event(first_ev, mark);
+                self.emit(ev, mark);
                 self.load_mapping()
             }
             _ => {
-                println!("UNREACHABLE EVENT: {:?}", first_ev);
+                println!("UNREACHABLE EVENT: {:?}", ev);
                 unreachable!();
             }
         }
@@ -234,15 +227,13 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
             self.load_node(key_ev, key_mark)?;
 
             // value
-            let (ev, mark) = self.next()?;
-            self.load_node(ev, mark)?;
+            let (val_ev, val_mark) = self.next()?;
+            self.load_node(val_ev, val_mark)?;
 
             // next event
-            let (ev, mark) = self.next()?;
-            key_ev = ev;
-            key_mark = mark;
+            (key_ev, key_mark) = self.next()?;
         }
-        self.recv.on_event(key_ev, key_mark);
+        self.emit(key_ev, key_mark);
         Ok(())
     }
 
@@ -250,13 +241,9 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
         let (mut ev, mut mark) = self.next()?;
         while ev != Event::SequenceEnd {
             self.load_node(ev, mark)?;
-
-            // next event
-            let (next_ev, next_mark) = self.next()?;
-            ev = next_ev;
-            mark = next_mark;
+            (ev, mark) = self.next()?;
         }
-        self.recv.on_event(ev, mark);
+        self.emit(ev, mark);
         Ok(())
     }
 
@@ -806,6 +793,19 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
     fn flow_sequence_entry_mapping_end(&mut self) -> ParseResult {
         self.state = State::FlowSequenceEntry;
         Ok((Event::MappingEnd, self.scanner.get_mark()))
+    }
+}
+
+#[cfg(test)]
+impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
+    fn peek(&mut self) -> Result<&(Event, Marker), ScanError> {
+        match self.current {
+            Some(ref x) => Ok(x),
+            None => {
+                self.current = Some(self.next()?);
+                self.peek()
+            }
+        }
     }
 }
 
