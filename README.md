@@ -1,5 +1,7 @@
 # yaml-rust
 
+> Note that this fork is a personal attempt at supporting comment parsing
+
 The missing YAML 1.2 implementation for Rust.
 
 [![Travis](https://travis-ci.org/chyh1990/yaml-rust.svg?branch=master)](https://travis-ci.org/chyh1990/yaml-rust)
