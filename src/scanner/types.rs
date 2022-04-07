@@ -7,18 +7,15 @@ pub enum TEncoding {
 
 #[derive(Clone, Copy, PartialEq, Debug, Eq)]
 pub enum TScalarStyle {
-    Any,
     Plain,
     SingleQuoted,
     DoubleQuoted,
-
     Literal,
-    Foled,
+    Folded,
 }
 
 #[derive(Clone, PartialEq, Debug, Eq)]
 pub enum TokenType {
-    NoToken,
     StreamStart(TEncoding),
     StreamEnd,
     /// major, minor
