@@ -40,7 +40,8 @@ pub enum TokenType {
     /// handle, suffix
     Tag(String, String),
     Scalar(TScalarStyle, String),
-    Comment(String),
+    // comment, inline
+    Comment(String, bool),
 }
 
 #[derive(Clone, PartialEq, Debug, Eq)]

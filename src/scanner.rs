@@ -36,6 +36,8 @@ pub struct Scanner<T> {
     flow_level: u8,
     tokens_parsed: usize,
     token_available: bool,
+    skipped_line: bool,
+    reset_skipped_line: bool,
 }
 
 impl<T: Iterator<Item = char>> Iterator for Scanner<T> {
@@ -76,6 +78,8 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             flow_level: 0,
             tokens_parsed: 0,
             token_available: false,
+            skipped_line: false,
+            reset_skipped_line: false,
         }
     }
 
@@ -125,6 +129,8 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         self.mark.index += 1;
         match c {
             '\n' | '\r' => {
+                self.skipped_line = true;
+                self.reset_skipped_line = true;
                 self.mark.line += 1;
                 self.mark.col = 0;
             }
@@ -132,7 +138,10 @@ impl<T: Iterator<Item = char>> Scanner<T> {
         }
     }
 
-    fn skip_line(&mut self) {
+    fn skip_line(&mut self, should_reset: bool) {
+        self.skipped_line = true;
+        self.reset_skipped_line = should_reset;
+
         if self.buffer[0] == '\r' && self.buffer[1] == '\n' {
             self.skip();
             self.skip();
@@ -146,9 +155,13 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             s.push('\n');
             self.skip();
             self.skip();
+            self.skipped_line = true;
+            self.reset_skipped_line = false;
         } else if self.buffer[0] == '\r' || self.buffer[0] == '\n' {
             s.push('\n');
             self.skip();
+            self.skipped_line = true;
+            self.reset_skipped_line = false;
         } else {
             unreachable!();
         }
@@ -164,6 +177,10 @@ impl<T: Iterator<Item = char>> Scanner<T> {
     }
 
     fn fetch_next_token(&mut self) -> ScanResult {
+        if self.reset_skipped_line {
+            self.skipped_line = false;
+        }
+
         self.lookahead(1);
         // println!("--> fetch_next_token Cur {:?} {:?}", self.mark, self.ch());
 
@@ -318,7 +335,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                 '\t' if self.flow_level > 0 || !self.simple_key_allowed => self.skip(),
                 '\n' | '\r' => {
                     self.lookahead(2);
-                    self.skip_line();
+                    self.skip_line(true);
                     if self.flow_level == 0 {
                         self.allow_simple_key();
                     }
@@ -399,34 +416,41 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                 // name"))
             }
         };
-        self.lookahead(1);
-
-        while is_blank(self.ch()) {
-            self.skip();
-            self.lookahead(1);
-        }
-
-        if self.ch() == '#' {
-            while !is_breakz(self.ch()) {
-                self.skip();
-                self.lookahead(1);
-            }
-        }
-
-        if !is_breakz(self.ch()) {
-            return Err(ScanError::new(
-                start_mark,
-                "while scanning a directive, did not find expected comment or line break",
-            ));
-        }
-
-        // Eat a line break
-        if is_break(self.ch()) {
-            self.lookahead(2);
-            self.skip_line();
-        }
-
         Ok(tok)
+
+        // TODO(alex)
+        // As part of adding inline comment scanning support, I've commented
+        // the following piece of logic, since I believe the fetch_next_token
+        // should be taking care of consuming line breaks. Leaving a TODO
+        // to remove this commented code once I'm confident all is well. Don't
+        // want to do git archeology to bring it back.
+        //
+        // self.lookahead(1);
+
+        // while is_blank(self.ch()) {
+        //     self.skip();
+        //     self.lookahead(1);
+        // }
+
+        // if self.ch() == '#' {
+        //     while !is_breakz(self.ch()) {
+        //         self.skip();
+        //         self.lookahead(1);
+        //     }
+        // }
+
+        // if !is_breakz(self.ch()) {
+        //     return Err(ScanError::new(
+        //         start_mark,
+        //         "while scanning a directive, did not find expected comment or
+        // line break",     ));
+        // }
+
+        // // Eat a line break
+        // if is_break(self.ch()) {
+        //     self.lookahead(2);
+        //     self.skip_line();
+        // }
     }
 
     fn scan_version_directive_value(&mut self, mark: &Marker) -> Result<Token, ScanError> {
@@ -984,7 +1008,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
 
         if is_break(self.ch()) {
             self.lookahead(2);
-            self.skip_line();
+            self.skip_line(false);
         }
 
         if increment > 0 {
@@ -1172,7 +1196,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
                     '\\' if !single && is_break(self.buffer[1]) => {
                         self.lookahead(3);
                         self.skip();
-                        self.skip_line();
+                        self.skip_line(false);
                         leading_blanks = true;
                         break;
                     }
@@ -1355,8 +1379,11 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             }
 
             if self.ch() == '#' {
+                // Overrule whatever read_break did
+                self.reset_skipped_line = true;
                 break;
             }
+
             while !is_blankz(self.ch()) {
                 // indicators can end a plain scalar, see 7.3.3. Plain Style
                 match self.ch() {
@@ -1602,7 +1629,7 @@ impl<T: Iterator<Item = char>> Scanner<T> {
             self.lookahead(1);
         }
 
-        let token = Token(mark, TokenType::Comment(comment));
+        let token = Token(mark, TokenType::Comment(comment, !self.skipped_line));
         self.tokens.push_back(token);
         Ok(())
     }
@@ -1625,12 +1652,23 @@ mod test {
                 _ => panic!("unexpected token: {:?}", token),
             }
         }};
-        // Expect a token with value
+        // Expect a token with one value
         ($it:ident, $expected_token:ident, $expected_value:expr) => {{
             let token = $it.next().unwrap();
             match token.1 {
-                $expected_token(ref v) => {
+                $expected_token(ref v, _) => {
                     assert_eq!(v, $expected_value);
+                }
+                _ => panic!("unexpected token: {:?}", token),
+            }
+        }};
+        // Expect a token with two values
+        ($it:ident, $expected_token:ident, $expected_value_one:expr, $expected_value_two:expr) => {{
+            let token = $it.next().unwrap();
+            match token.1 {
+                $expected_token(ref v1, v2) => {
+                    assert_eq!(v1, $expected_value_one);
+                    assert_eq!(v2, $expected_value_two);
                 }
                 _ => panic!("unexpected token: {:?}", token),
             }
@@ -1747,7 +1785,7 @@ mod test {
         next!(p, Value);
         next!(p, Scalar(TScalarStyle::Plain, _));
         next!(p, FlowEntry);
-        next!(p, Comment(_));
+        next!(p, Comment(_, true));
         next!(p, Key);
         next!(p, TScalarStyle::Plain, "a complex key");
         next!(p, Value);
@@ -1820,7 +1858,7 @@ a sequence:
         next!(p, Scalar(_, _));
         next!(p, Value);
         next!(p, Scalar(_, _));
-        next!(p, Comment(_));
+        next!(p, Comment(_, _));
         next!(p, Key);
         next!(p, Scalar(_, _));
         next!(p, Value);
@@ -2069,32 +2107,66 @@ key:
 #Comment B
 ### Comment C
 ###Comment D
-a0 bb: \"#trickyval\" #'comment e
+a0 bb: \"#trickyval\" #inline comment quoted
+a2: 4 # inline comment plain
 - some value 1
 # interleaved comment
+- some value 2 # array inline
+array: [
+    1, # inline array entry
+    2,
+    # on top of array entry
+    3
+] #end of array inline should be not inlined
 - some value 2 # block-end-comment
 
 ";
         let mut p = get_scanner(s);
         next!(p, StreamStart(..));
         next!(p, DocumentStart);
-        next!(p, Comment, "Comment Header");
-        next!(p, Comment, "Comment A");
-        next!(p, Comment, "Comment B");
-        next!(p, Comment, "Comment C");
-        next!(p, Comment, "Comment D");
+        next!(p, Comment, "Comment Header", true);
+        next!(p, Comment, "Comment A", false);
+        next!(p, Comment, "Comment B", false);
+        next!(p, Comment, "Comment C", false);
+        next!(p, Comment, "Comment D", false);
         next!(p, BlockMappingStart);
         next!(p, Key);
         next!(p, TScalarStyle::Plain, "a0 bb");
         next!(p, Value);
         next!(p, TScalarStyle::DoubleQuoted, "#trickyval");
-        next!(p, Comment, "'comment e");
+        next!(p, Comment, "inline comment quoted", true);
+        next!(p, Key);
+        next!(p, TScalarStyle::Plain, "a2");
+        next!(p, Value);
+        next!(p, TScalarStyle::Plain, "4");
+        next!(p, Comment, "inline comment plain", true);
         next!(p, BlockEntry);
         next!(p, TScalarStyle::Plain, "some value 1");
-        next!(p, Comment, "interleaved comment");
+        next!(p, Comment, "interleaved comment", false);
         next!(p, BlockEntry);
         next!(p, TScalarStyle::Plain, "some value 2");
-        next!(p, Comment, "block-end-comment");
+        next!(p, Comment, "array inline", true);
+        next!(p, Key);
+        next!(p, TScalarStyle::Plain, "array");
+        next!(p, Value);
+        next!(p, FlowSequenceStart);
+        next!(p, TScalarStyle::Plain, "1");
+        next!(p, FlowEntry);
+        next!(p, Comment, "inline array entry", true);
+        next!(p, TScalarStyle::Plain, "2");
+        next!(p, FlowEntry);
+        next!(p, Comment, "on top of array entry", false);
+        next!(p, TScalarStyle::Plain, "3");
+        next!(p, FlowSequenceEnd);
+        next!(
+            p,
+            Comment,
+            "end of array inline should be not inlined",
+            false
+        );
+        next!(p, BlockEntry);
+        next!(p, TScalarStyle::Plain, "some value 2");
+        next!(p, Comment, "block-end-comment", true);
         next!(p, BlockEnd);
         next!(p, StreamEnd);
         end!(p);
