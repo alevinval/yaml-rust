@@ -12,12 +12,14 @@ pub enum Event {
     DocumentStart,
     DocumentEnd,
     Alias(AnchorID),
-    /// Value, style, anchor_id, tag
+    /// value, style, anchor_id, tag
     Scalar(String, TScalarStyle, AnchorID, Option<TokenType>),
     SequenceStart(AnchorID),
     SequenceEnd,
     MappingStart(AnchorID),
     MappingEnd,
+    // comment, inline
+    Comment(String, bool),
 }
 
 pub fn empty_scalar() -> Event {

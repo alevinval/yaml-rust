@@ -31,10 +31,10 @@ pub trait EventReceiver {
 }
 
 impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
-    pub fn new(src: T, recv: &'re mut R) -> Parser<T, R> {
+    pub fn new(src: T, recv: &'re mut R, with_comments: bool) -> Parser<T, R> {
         Parser {
             recv,
-            scanner: Scanner::new(src, false),
+            scanner: Scanner::new(src, with_comments),
             states: Vec::new(),
             state: State::StreamStart,
             token: None,
@@ -59,7 +59,13 @@ impl<'re, T: Iterator<Item = char>, R: EventReceiver> Parser<'re, T, R> {
 
     fn peek_token(&mut self) -> Result<&Token, ScanError> {
         if self.token.is_none() {
-            self.token = Some(self.scan_next_token()?)
+            let mut next = self.scan_next_token()?;
+            while let Token(mark, TokenType::Comment(comment, inline)) = next {
+                let event = Event::Comment(comment, inline);
+                self.emit(event, mark);
+                next = self.scan_next_token()?;
+            }
+            self.token = Some(next)
         }
         Ok(self.token.as_ref().unwrap())
     }
@@ -783,7 +789,7 @@ a4:
 a5: *x
 ";
         let mut recv = NoOpRecv {};
-        let mut p = Parser::new(s.chars(), &mut recv);
+        let mut p = Parser::new(s.chars(), &mut recv, true);
         while {
             let event_peek = p.peek().unwrap().clone();
             let event = p.next().unwrap();

@@ -52,7 +52,7 @@ impl EventReceiver for YamlChecker {
 
 fn str_to_test_events(docs: &str) -> Vec<TestEvent> {
     let mut p = YamlChecker { evs: Vec::new() };
-    let mut parser = Parser::new(docs.chars(), &mut p);
+    let mut parser = Parser::new(docs.chars(), &mut p, true);
     parser.load(true).unwrap();
     p.evs
 }

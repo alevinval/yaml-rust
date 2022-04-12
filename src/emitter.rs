@@ -4,9 +4,33 @@ use self::funcs::need_quotes;
 use crate::yaml::Hash;
 use crate::yaml::Yaml;
 use std::fmt;
+use std::iter::Peekable;
 
 mod error;
 mod funcs;
+
+macro_rules! debug_comment {
+  ($msg:expr) => {
+    comment_debug!($msg,);
+  };
+  ($msg:expr, $($opt:expr), *) => {
+    println!("[DEBUG-COMMENT]");
+    println!(" => {}", $msg);
+    $(
+      println!(" => {}: {:?}", stringify!($opt), $opt);
+    )*
+  };
+}
+
+macro_rules! debug_comment_disallowed {
+  ($msg:expr) => {
+    debug_comment_disallowed!($msg,);
+  };
+  ($msg:expr, $($opt:expr), *) => {
+    debug_comment!($msg, $($opt)*);
+    unreachable!("[DEBUG-COMMENT-DISALLOWED]");
+  };
+}
 
 pub struct YamlEmitter<'a> {
     writer: &'a mut dyn fmt::Write,
@@ -78,6 +102,13 @@ impl<'a> YamlEmitter<'a> {
                 write!(self.writer, "{}", v)?;
                 Ok(())
             }
+            Yaml::Comment(ref comment, inline) => {
+                match inline {
+                    true => write!(self.writer, " #{}", comment)?,
+                    false => write!(self.writer, "#{}", comment)?,
+                }
+                Ok(())
+            }
             Yaml::Null | Yaml::BadValue => {
                 write!(self.writer, "~")?;
                 Ok(())
@@ -93,12 +124,30 @@ impl<'a> YamlEmitter<'a> {
         }
 
         self.level += 1;
-        for (idx, entry) in arr.iter().enumerate() {
+        let mut idx = -1;
+        let mut iter = arr.iter().peekable();
+        while let Some(entry) = iter.next() {
+            idx += 1;
             if idx > 0 {
                 self.emit_line_begin()?;
             }
+
+            if entry.is_comment() {
+                debug_comment!("emitting comment inside array (as entry)", entry);
+                self.emit_node(entry)?;
+                continue;
+            }
+
             write!(self.writer, "-")?;
             self.emit_value(true, entry)?;
+
+            if let Some(comment) = array_next_is_comment_inline(&mut iter) {
+                debug_comment!(
+                    "emitting comment inside array (inlined after value)",
+                    comment
+                );
+                self.emit_node(comment)?;
+            }
         }
         self.level -= 1;
         Ok(())
@@ -111,10 +160,20 @@ impl<'a> YamlEmitter<'a> {
         }
 
         self.level += 1;
-        for (idx, (key, value)) in hash.iter().enumerate() {
+        let mut idx = -1;
+        let mut iter = hash.iter().peekable();
+        while let Some((key, value)) = iter.next() {
+            idx += 1;
             if idx > 0 {
                 self.emit_line_begin()?;
             }
+
+            if key.is_comment() {
+                debug_comment!("emitting comment inside hash (as key)", key);
+                self.emit_node(key)?;
+                continue;
+            }
+
             let is_complex_key = matches!(*key, Yaml::Hash(_) | Yaml::Array(_));
             if is_complex_key {
                 write!(self.writer, "?")?;
@@ -126,6 +185,11 @@ impl<'a> YamlEmitter<'a> {
                 self.emit_node(key)?;
                 write!(self.writer, ":")?;
                 self.emit_value(false, value)?;
+            }
+
+            if let Some((key, _)) = hash_next_is_comment_inline(&mut iter) {
+                debug_comment!("emitting comment inside hash (inlined after value)", key);
+                self.emit_node(key)?;
             }
         }
         self.level -= 1;
@@ -160,6 +224,9 @@ impl<'a> YamlEmitter<'a> {
                 }
                 self.emit_hash(hash)
             }
+            Yaml::Comment(_, _) => {
+                debug_comment_disallowed!("should never emit comment as value", value);
+            }
             _ => {
                 write!(self.writer, " ")?;
                 self.emit_node(value)
@@ -174,14 +241,33 @@ impl<'a> YamlEmitter<'a> {
     }
 
     fn emit_indent(&mut self) -> EmitResult {
-        if self.level <= 0 {
-            return Ok(());
-        }
         for _ in 0..(self.level * self.best_indent as isize) {
             write!(self.writer, " ")?;
         }
         Ok(())
     }
+}
+
+fn hash_next_is_comment_inline<'a>(
+    iter: &mut Peekable<impl Iterator<Item = (&'a Yaml, &'a Yaml)>>,
+) -> Option<(&'a Yaml, &'a Yaml)> {
+    if let Some((Yaml::Comment(_, inline), _)) = iter.peek() {
+        if *inline {
+            return iter.next();
+        }
+    }
+    None
+}
+
+fn array_next_is_comment_inline<'a>(
+    iter: &mut Peekable<impl Iterator<Item = &'a Yaml>>,
+) -> Option<&'a Yaml> {
+    if let Some(Yaml::Comment(_, inline)) = iter.peek() {
+        if *inline {
+            return iter.next();
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -206,11 +292,12 @@ a4:
 ";
 
         let expected = "---
+# comment
 a0 bb: val
 a1:
   b1: 4
   b2: d
-a2: 4
+a2: 4 # i'm comment
 a3:
   - 1
   - 2
@@ -474,35 +561,7 @@ resources: {}
 nodeSelector: {}
 tolerations: []"#;
 
-        let expected = r#"---
-replicaCount: 1
-image:
-  repository: nginx
-  tag: stable
-  pullPolicy: IfNotPresent
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-serviceAccount:
-  create: true
-  name: some name
-podSecurityContext: {}
-securityContext: {}
-service:
-  type: ClusterIP
-  port: 80
-ingress:
-  enabled: false
-  annotations: {}
-  hosts:
-    - host: chart-example.local
-      paths: []
-      tls: []
-resources: {}
-nodeSelector: {}
-tolerations: []"#;
-
-        assert_formatted(expected, input, true);
+        assert_roundtrip(input);
     }
 
     #[test]
@@ -529,22 +588,7 @@ repos:
     hooks:
       - id: helmlint"#;
 
-        let expected = r#"---
-repos:
-  - repo: "https://github.com/rapidsai/frigate/"
-    rev: v0.4.0
-    hooks:
-      - id: frigate
-        versions:
-          - 1
-          - 2
-          - 3
-  - repo: "https://github.com/gruntwork-io/pre-commit"
-    rev: v0.1.12
-    hooks:
-      - id: helmlint"#;
-
-        assert_formatted(expected, input, true);
+        assert_roundtrip(input);
     }
 
     // Asserts the roundtrip result is the same than the input

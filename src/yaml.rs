@@ -7,6 +7,7 @@ use crate::scanner::TScalarStyle;
 use crate::scanner::TokenType;
 use linked_hash_map::LinkedHashMap;
 use std::collections::BTreeMap;
+use std::collections::LinkedList;
 use std::f64;
 use std::i64;
 use std::mem;
@@ -50,6 +51,8 @@ pub enum Yaml {
     Hash(self::Hash),
     /// Alias, not fully supported yet.
     Alias(usize),
+    /// Comment, Inline
+    Comment(string::String, bool),
     /// YAML null, e.g. `null` or `~`.
     Null,
     /// Accessing a nonexistent node via the Index trait returns `BadValue`.
@@ -79,6 +82,7 @@ pub struct YamlLoader {
     doc_stack: Vec<(Yaml, usize)>,
     key_stack: Vec<Yaml>,
     anchor_map: BTreeMap<usize, Yaml>,
+    comments: LinkedList<Yaml>,
 }
 
 impl EventReceiver for YamlLoader {
@@ -101,14 +105,17 @@ impl EventReceiver for YamlLoader {
                 self.doc_stack.push((Yaml::Array(Vec::new()), aid));
             }
             Event::SequenceEnd => {
+                self.dump_comments(1);
                 let node = self.doc_stack.pop().unwrap();
                 self.insert_new_node(node);
             }
             Event::MappingStart(aid) => {
+                self.dump_comments(2);
                 self.doc_stack.push((Yaml::Hash(Hash::new()), aid));
                 self.key_stack.push(Yaml::BadValue);
             }
             Event::MappingEnd => {
+                self.dump_comments(1);
                 self.key_stack.pop().unwrap();
                 let node = self.doc_stack.pop().unwrap();
                 self.insert_new_node(node);
@@ -148,7 +155,7 @@ impl EventReceiver for YamlLoader {
                     // Datatype is not specified, or unrecognized
                     Yaml::from_str(&v)
                 };
-
+                self.dump_comments(1);
                 self.insert_new_node((node, aid));
             }
             Event::Alias(id) => {
@@ -157,6 +164,10 @@ impl EventReceiver for YamlLoader {
                     None => Yaml::BadValue,
                 };
                 self.insert_new_node((n, 0));
+            }
+            Event::Comment(comment, inline) => {
+                let node = Yaml::Comment(comment, inline);
+                self.comments.push_front(node)
             }
             _ => { /* ignore */ }
         }
@@ -173,10 +184,14 @@ impl YamlLoader {
         if self.doc_stack.is_empty() {
             self.doc_stack.push(node);
         } else {
-            let parent = self.doc_stack.last_mut().unwrap();
+            let (parent, _) = self.doc_stack.last_mut().unwrap();
             match *parent {
-                (Yaml::Array(ref mut v), _) => v.push(node.0),
-                (Yaml::Hash(ref mut h), _) => {
+                Yaml::Array(ref mut v) => v.push(node.0),
+                Yaml::Hash(ref mut h) => {
+                    if node.0.is_comment() {
+                        h.insert(node.0, Yaml::BadValue);
+                        return;
+                    }
                     let cur_key = self.key_stack.last_mut().unwrap();
                     // current node is a key
                     if cur_key.is_badvalue() {
@@ -188,8 +203,24 @@ impl YamlLoader {
                         h.insert(newkey, node.0);
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    unreachable!(
+                        "should never be executed: parent={:?} node={:?}",
+                        parent, node
+                    );
+                }
             }
+        }
+    }
+
+    fn dump_comments(&mut self, min_doc_stack: usize) {
+        // Only dumps the document list if the document stack has the minimum
+        // length required for this operation to be safe.
+        if self.doc_stack.len() < min_doc_stack {
+            return;
+        }
+        while let Some(comment) = self.comments.pop_back() {
+            self.insert_new_node((comment, 0));
         }
     }
 
@@ -199,8 +230,12 @@ impl YamlLoader {
             doc_stack: Vec::new(),
             key_stack: Vec::new(),
             anchor_map: BTreeMap::new(),
+            comments: LinkedList::new(),
         };
-        let mut parser = Parser::new(source.chars(), &mut loader);
+
+        let with_comments = cfg!(test);
+        let mut parser = Parser::new(source.chars(), &mut loader, with_comments);
+
         parser.load(true)?;
         Ok(loader.docs)
     }
@@ -270,6 +305,10 @@ impl Yaml {
 
     pub fn is_array(&self) -> bool {
         matches!(*self, Yaml::Array(_))
+    }
+
+    pub fn is_comment(&self) -> bool {
+        matches!(*self, Yaml::Comment(_, _))
     }
 
     pub fn as_f64(&self) -> Option<f64> {
@@ -520,16 +559,17 @@ a1: &DEFAULT
         assert_eq!(doc[15].as_bool().unwrap(), true);
         assert_eq!(doc[16].as_bool().unwrap(), false);
         assert_eq!(doc[17].as_i64().unwrap(), 255);
-        assert!(doc[18].is_badvalue());
+        assert!(doc[18].is_comment());
         assert!(doc[19].is_badvalue());
         assert!(doc[20].is_badvalue());
         assert!(doc[21].is_badvalue());
-        assert_eq!(doc[22].as_i64().unwrap(), 63);
-        assert_eq!(doc[23][0].as_i64().unwrap(), 15);
-        assert_eq!(doc[23][1].as_i64().unwrap(), 15);
-        assert_eq!(doc[24].as_i64().unwrap(), 12345);
-        assert!(doc[25][0].as_bool().unwrap());
-        assert!(!doc[25][1].as_bool().unwrap());
+        assert!(doc[22].is_badvalue());
+        assert_eq!(doc[23].as_i64().unwrap(), 63);
+        assert_eq!(doc[24][0].as_i64().unwrap(), 15);
+        assert_eq!(doc[24][1].as_i64().unwrap(), 15);
+        assert_eq!(doc[25].as_i64().unwrap(), 12345);
+        assert!(doc[26][0].as_bool().unwrap());
+        assert!(!doc[26][1].as_bool().unwrap());
     }
 
     #[test]
