@@ -188,10 +188,11 @@ impl<'a> YamlEmitter<'a> {
 mod test {
     use super::*;
     use crate::YamlLoader;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_emit_simple() {
-        let s = "
+        let input = "
 # comment
 a0 bb: val
 a1:
@@ -204,27 +205,26 @@ a4:
     - 2
 ";
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-        println!("original:\n{}", s);
-        println!("emitted:\n{}", writer);
-        let docs_new = match YamlLoader::load_from_str(&writer) {
-            Ok(y) => y,
-            Err(e) => panic!("{}", e),
-        };
-        let doc_new = &docs_new[0];
-
-        assert_eq!(doc, doc_new);
+        let expected = "---
+a0 bb: val
+a1:
+  b1: 4
+  b2: d
+a2: 4
+a3:
+  - 1
+  - 2
+  - 3
+a4:
+  - - a1
+    - a2
+  - 2";
+        assert_formatted(expected, input, true);
     }
 
     #[test]
     fn test_emit_complex() {
-        let s = r#"
+        let input = r#"
 cataloge:
   product: &coffee   { name: Coffee,    price: 2.5  ,  unit: 1l  }
   product: &cookies  { name: Cookies!,  price: 3.40 ,  unit: 400g}
@@ -243,24 +243,37 @@ products:
   {}:
     empty hash key
             "#;
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-        let docs_new = match YamlLoader::load_from_str(&writer) {
-            Ok(y) => y,
-            Err(e) => panic!("{}", e),
-        };
-        let doc_new = &docs_new[0];
-        assert_eq!(doc, doc_new);
+        let expected = r#"---
+cataloge:
+  product:
+    name: Cookies!
+    price: 3.40
+    unit: 400g
+products:
+  ? name: Coffee
+    price: 2.5
+    unit: 1l
+  : amount: 4
+  ? name: Cookies!
+    price: 3.40
+    unit: 400g
+  : amount: 4
+  ? - 1
+    - 2
+    - 3
+    - 4
+  : array key
+  2.4: real key
+  true: bool key
+  ? {}
+  : empty hash key"#;
+
+        assert_formatted(expected, input, true);
     }
 
     #[test]
     fn test_emit_avoid_quotes() {
-        let s = r#"---
+        let input = r#"---
 a7: 你好
 boolean: "true"
 boolean2: "false"
@@ -294,15 +307,7 @@ x: test
 y: avoid quoting here
 z: string with spaces"#;
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-
-        assert_eq!(s, writer, "actual:\n\n{}\n", writer);
+        assert_roundtrip(input);
     }
 
     #[test]
@@ -352,34 +357,12 @@ null0: ~
 bool0: true
 bool1: false"#;
 
-        let docs = YamlLoader::load_from_str(&input).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-
-        assert_eq!(
-            expected, writer,
-            "expected:\n{}\nactual:\n{}\n",
-            expected, writer
-        );
+        assert_formatted(expected, input, true);
     }
 
     #[test]
     fn test_empty_and_nested() {
-        test_empty_and_nested_flag(false)
-    }
-
-    #[test]
-    fn test_empty_and_nested_compact() {
-        test_empty_and_nested_flag(true)
-    }
-
-    fn test_empty_and_nested_flag(compact: bool) {
-        let s = if compact {
-            r#"---
+        let input = r#"---
 a:
   b:
     c: hello
@@ -387,9 +370,9 @@ a:
 e:
   - f
   - g
-  - h: []"#
-        } else {
-            r#"---
+  - h: []"#;
+
+        let noncompact_input = r#"---
 a:
   b:
     c: hello
@@ -398,24 +381,15 @@ e:
   - f
   - g
   -
-    h: []"#
-        };
+    h: []"#;
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.compact(compact);
-            emitter.dump(doc).unwrap();
-        }
-
-        assert_eq!(s, writer);
+        assert_roundtrip(input);
+        assert_roundtrip_noncompact(noncompact_input);
     }
 
     #[test]
     fn test_nested_arrays() {
-        let s = r#"---
+        let input = r#"---
 a:
   - b
   - - c
@@ -423,22 +397,12 @@ a:
     - - e
       - f"#;
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-        println!("original:\n{}", s);
-        println!("emitted:\n{}", writer);
-
-        assert_eq!(s, writer);
+        assert_roundtrip(input);
     }
 
     #[test]
     fn test_deeply_nested_arrays() {
-        let s = r#"---
+        let input = r#"---
 a:
   - b
   - - c
@@ -447,38 +411,161 @@ a:
       - - f
       - - e"#;
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-        println!("original:\n{}", s);
-        println!("emitted:\n{}", writer);
-
-        assert_eq!(s, writer);
+        assert_roundtrip(input);
     }
 
     #[test]
     fn test_nested_hashes() {
-        let s = r#"---
+        let input = r#"---
 a:
   b:
     c:
       d:
         e: f"#;
 
-        let docs = YamlLoader::load_from_str(&s).unwrap();
-        let doc = &docs[0];
-        let mut writer = String::new();
-        {
-            let mut emitter = YamlEmitter::new(&mut writer);
-            emitter.dump(doc).unwrap();
-        }
-        println!("original:\n{}", s);
-        println!("emitted:\n{}", writer);
+        assert_roundtrip(input);
+    }
 
-        assert_eq!(s, writer);
+    #[test]
+    fn test_emitter_comments_yaml_helm_chart() {
+        let input = r#"---
+# Default values for example.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+replicaCount: 1
+image:
+  repository: nginx
+  tag: stable
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: some name
+podSecurityContext: {}
+# fsGroup: 2000
+securityContext: {}
+# capabilities:
+#   drop:
+#   - ALL
+# readOnlyRootFilesystem: true
+# runAsNonRoot: true
+# runAsUser: 1000
+service:
+  type: ClusterIP
+  port: 80
+ingress:
+  enabled: false
+  annotations: {}
+  # kubernetes.io/ingress.class: nginx
+  # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths: []
+      tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+resources: {}
+nodeSelector: {}
+tolerations: []"#;
+
+        let expected = r#"---
+replicaCount: 1
+image:
+  repository: nginx
+  tag: stable
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  name: some name
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 80
+ingress:
+  enabled: false
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths: []
+      tls: []
+resources: {}
+nodeSelector: {}
+tolerations: []"#;
+
+        assert_formatted(expected, input, true);
+    }
+
+    #[test]
+    fn test_emitter_comments_inline() {
+        let input = r#"---
+repos:
+  # Is this supported?
+  - repo: "https://github.com/rapidsai/frigate/"
+    rev: v0.4.0 #  pre-commit autoupdate  - to keep the version up to date
+    # and an in between keys comment here
+    hooks:
+      - id: frigate
+        # Initial comment
+        versions:
+          - 1 # An inline comment
+          # What?
+          # Another comment
+          # More comments...
+          - 2
+          - 3 # The last comment
+          # And a confusing one too
+  - repo: "https://github.com/gruntwork-io/pre-commit"
+    rev: v0.1.12 #  pre-commit autoupdate  - to keep the version up to date
+    hooks:
+      - id: helmlint"#;
+
+        let expected = r#"---
+repos:
+  - repo: "https://github.com/rapidsai/frigate/"
+    rev: v0.4.0
+    hooks:
+      - id: frigate
+        versions:
+          - 1
+          - 2
+          - 3
+  - repo: "https://github.com/gruntwork-io/pre-commit"
+    rev: v0.1.12
+    hooks:
+      - id: helmlint"#;
+
+        assert_formatted(expected, input, true);
+    }
+
+    // Asserts the roundtrip result is the same than the input
+    fn assert_roundtrip(input: &str) {
+        assert_formatted(input, input, true)
+    }
+
+    fn assert_roundtrip_noncompact(input: &str) {
+        assert_formatted(input, input, false)
+    }
+
+    // Asserts the input is formatted to the expected output
+    fn assert_formatted(expected: &str, input: &str, compact: bool) {
+        let docs = YamlLoader::load_from_str(input).unwrap();
+        let first_doc = &docs[0];
+
+        let mut output = String::new();
+        let mut emitter = YamlEmitter::new(&mut output);
+        emitter.compact(compact);
+        emitter.dump(first_doc).unwrap();
+
+        assert_eq!(expected, output)
     }
 }
