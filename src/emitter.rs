@@ -2,7 +2,7 @@ pub use self::error::EmitError;
 use self::funcs::escape_str;
 use self::funcs::need_quotes;
 use crate::yaml::Hash;
-use crate::yaml::Yaml;
+use crate::yaml::{IntegerFormat, Meta, StringFormat, Yaml};
 use std::fmt;
 
 mod error;
@@ -12,8 +12,9 @@ pub struct YamlEmitter<'a> {
     writer: &'a mut dyn fmt::Write,
     best_indent: usize,
     compact: bool,
-
     level: isize,
+    intformat: IntegerFormat,
+    strformat: StringFormat,
 }
 
 pub type EmitResult = Result<(), EmitError>;
@@ -25,6 +26,8 @@ impl<'a> YamlEmitter<'a> {
             best_indent: 2,
             compact: true,
             level: -1,
+            intformat: IntegerFormat::Decimal,
+            strformat: StringFormat::Standard,
         }
     }
 
@@ -73,14 +76,7 @@ impl<'a> YamlEmitter<'a> {
         match *node {
             Yaml::Array(ref v) => self.emit_array(v),
             Yaml::Hash(ref v) => self.emit_hash(v),
-            Yaml::String(ref v) => {
-                if need_quotes(v) {
-                    escape_str(self.writer, v)?;
-                } else {
-                    write!(self.writer, "{}", v)?;
-                }
-                Ok(())
-            }
+            Yaml::String(ref v) => self.emit_string(v.as_str()),
             Yaml::Boolean(v) => {
                 match v {
                     true => write!(self.writer, "true")?,
@@ -88,10 +84,7 @@ impl<'a> YamlEmitter<'a> {
                 }
                 Ok(())
             }
-            Yaml::Integer(v) => {
-                write!(self.writer, "{}", v)?;
-                Ok(())
-            }
+            Yaml::Integer(v) => self.emit_integer(v),
             Yaml::Real(ref v) => {
                 write!(self.writer, "{}", v)?;
                 Ok(())
@@ -108,7 +101,115 @@ impl<'a> YamlEmitter<'a> {
                 Ok(())
             }
             Yaml::Alias(_) => Ok(()),
+            Yaml::Meta(ref op) => self.process_meta(op),
         }
+    }
+
+    fn process_meta(&mut self, op: &'a Meta) -> EmitResult {
+        match op {
+            Meta::Integer(f, node) => {
+                let old = self.intformat;
+                self.intformat = *f;
+                let res = self.emit_node(&node);
+                self.intformat = old;
+                res
+            }
+            Meta::String(f, node) => {
+                let old = self.strformat;
+                self.strformat = *f;
+                let res = self.emit_node(&node);
+                self.strformat = old;
+                res
+            }
+        }
+    }
+
+    fn emit_string(&mut self, mut value: &str) -> EmitResult {
+        match self.strformat {
+            StringFormat::Standard => {
+                if need_quotes(value) {
+                    escape_str(self.writer, value, true)?;
+                } else {
+                    write!(self.writer, "{}", value)?;
+                }
+            }
+            StringFormat::Quoted => escape_str(self.writer, value, true)?,
+            StringFormat::Block => {
+                if value.ends_with('\n') {
+                    writeln!(self.writer, "|+")?;
+                    value = &value[..value.len() - 1];
+                } else {
+                    writeln!(self.writer, "|-")?;
+                }
+                self.level += 1;
+                for (count, line) in value.split('\n').enumerate() {
+                    if count > 0 {
+                        writeln!(self.writer)?;
+                    }
+                    if !line.is_empty() {
+                        self.emit_indent()?;
+                        escape_str(self.writer, line, false)?;
+                    }
+                }
+                self.level -= 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_integer(&mut self, value: i64) -> EmitResult {
+        let (width, base) = match self.intformat {
+            IntegerFormat::Binary(w) => (w as usize, 2),
+            IntegerFormat::Decimal => {
+                write!(self.writer, "{}", value)?;
+                return Ok(());
+            }
+            IntegerFormat::Hex(w) => (w as usize, 16),
+            IntegerFormat::Octal(w) => (w as usize, 8),
+        };
+        if width > 64 {
+            return Err(EmitError::IntFmtWidth);
+        }
+        const BUFSZ: usize = 66;
+        let mut s = [b' '; BUFSZ];
+        let mut i = BUFSZ;
+        let mut value = value as u64;
+        loop {
+            i = i - 1;
+            match value % base {
+                x if x < 10 => s[i] = b'0' + (x as u8),
+                x => s[i] = b'A' + x as u8 - 10,
+            };
+            value = value / base;
+            if value == 0 {
+                break;
+            }
+        }
+        while BUFSZ - i < width {
+            i = i - 1;
+            s[i] = b'0';
+        }
+        match self.intformat {
+            IntegerFormat::Binary(_) => {
+                i = i - 2;
+                s[i] = b'0';
+                s[i + 1] = b'b';
+            }
+            IntegerFormat::Hex(_) => {
+                i = i - 2;
+                s[i] = b'0';
+                s[i + 1] = b'x';
+            }
+            IntegerFormat::Octal(_) => {
+                if s[i] != b'0' {
+                    i = i - 1;
+                    s[i] = b'0';
+                }
+            }
+            IntegerFormat::Decimal => {}
+        };
+        write!(self.writer, "{}", std::str::from_utf8(&s[i..]).unwrap())?;
+        Ok(())
     }
 
     fn emit_array(&mut self, arr: &'a [Yaml]) -> EmitResult {
@@ -359,6 +460,110 @@ a:
         e: f"#;
 
         assert_roundtrip(input);
+    }
+
+    fn yaml_string(s: &str) -> Yaml {
+        Yaml::String(s.to_string())
+    }
+    fn yaml_fmtstr(s: &str, f: StringFormat) -> Yaml {
+        Yaml::Meta(Meta::String(f, yaml_string(s).into()))
+    }
+    fn yaml_integer(v: i64, f: IntegerFormat) -> Yaml {
+        Yaml::Meta(Meta::Integer(f, Yaml::Integer(v).into()))
+    }
+    fn yaml_dump(doc: &Yaml) -> String {
+        let mut writer = String::new();
+        let mut emitter = YamlEmitter::new(&mut writer);
+        emitter.dump(&doc).unwrap();
+        writer
+    }
+
+    #[test]
+    fn test_integer_bases_simple() {
+        let expected = r#"---
+dec: 10
+bin: 0b1010
+hex: 0xA
+oct: 012"#;
+        let mut hash = Hash::new();
+        hash.insert(yaml_string("dec"), yaml_integer(10, IntegerFormat::Decimal));
+        hash.insert(
+            yaml_string("bin"),
+            yaml_integer(10, IntegerFormat::Binary(0)),
+        );
+        hash.insert(yaml_string("hex"), yaml_integer(10, IntegerFormat::Hex(0)));
+        hash.insert(
+            yaml_string("oct"),
+            yaml_integer(10, IntegerFormat::Octal(0)),
+        );
+        let result = yaml_dump(&Yaml::Hash(hash));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_integer_bases_widths() {
+        let expected = r#"---
+bin: 0b00001111
+hex: 0x0000ABCD
+oct: 0666"#;
+        let mut hash = Hash::new();
+        hash.insert(
+            yaml_string("bin"),
+            yaml_integer(15, IntegerFormat::Binary(8)),
+        );
+        hash.insert(
+            yaml_string("hex"),
+            yaml_integer(0xABCD, IntegerFormat::Hex(8)),
+        );
+        hash.insert(
+            yaml_string("oct"),
+            yaml_integer(0o666, IntegerFormat::Octal(3)),
+        );
+        let result = yaml_dump(&Yaml::Hash(hash));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_block_scalar() {
+        let expected = r#"---
+a: |+
+  This is a block scalar.
+  There are two newlines at the end of this string.
+
+b: |-
+  This is a block scalar.
+  There is no newline at the end of this string.
+c: "A plain string, forcibly quoted"
+d: no quotes needed
+e: "yes,\nquotes needed""#;
+
+        let mut hash = Hash::new();
+        hash.insert(
+            yaml_string("a"),
+            yaml_fmtstr(
+                "This is a block scalar.\nThere are two newlines at the end of this string.\n\n",
+                StringFormat::Block,
+            ),
+        );
+
+        hash.insert(
+            yaml_string("b"),
+            yaml_fmtstr(
+                "This is a block scalar.\nThere is no newline at the end of this string.",
+                StringFormat::Block,
+            ),
+        );
+
+        hash.insert(
+            yaml_string("c"),
+            yaml_fmtstr("A plain string, forcibly quoted", StringFormat::Quoted),
+        );
+
+        hash.insert(yaml_string("d"), yaml_string("no quotes needed"));
+        hash.insert(yaml_string("e"), yaml_string("yes,\nquotes needed"));
+
+        let result = yaml_dump(&Yaml::Hash(hash));
+        assert_eq!(expected, result);
     }
 
     fixture_test!(test_emit_simple, "emitter/simple");

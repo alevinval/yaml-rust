@@ -8,6 +8,7 @@ use std::fmt::Result;
 pub enum EmitError {
     FmtError(FmtError),
     BadHashmapKey,
+    IntFmtWidth,
 }
 
 impl Error for EmitError {
@@ -21,6 +22,7 @@ impl Display for EmitError {
         match *self {
             EmitError::FmtError(ref err) => Display::fmt(err, formatter),
             EmitError::BadHashmapKey => formatter.write_str("bad hashmap key"),
+            EmitError::IntFmtWidth => formatter.write_str("bad integer format width"),
         }
     }
 }

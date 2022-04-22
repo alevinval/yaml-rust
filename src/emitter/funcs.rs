@@ -1,14 +1,16 @@
 use std::fmt;
 
 // from serialize::json
-pub fn escape_str(wr: &mut dyn fmt::Write, v: &str) -> Result<(), fmt::Error> {
-    wr.write_str("\"")?;
+pub fn escape_str(wr: &mut dyn fmt::Write, v: &str, quoted: bool) -> Result<(), fmt::Error> {
+    if quoted {
+        wr.write_str("\"")?;
+    }
 
     let mut start = 0;
 
     for (i, byte) in v.bytes().enumerate() {
         let escaped = match byte {
-            b'"' => "\\\"",
+            b'"' if quoted => "\\\"",
             b'\\' => "\\\\",
             b'\x00' => "\\u0000",
             b'\x01' => "\\u0001",
@@ -58,8 +60,9 @@ pub fn escape_str(wr: &mut dyn fmt::Write, v: &str) -> Result<(), fmt::Error> {
     if start != v.len() {
         wr.write_str(&v[start..])?;
     }
-
-    wr.write_str("\"")?;
+    if quoted {
+        wr.write_str("\"")?;
+    }
     Ok(())
 }
 

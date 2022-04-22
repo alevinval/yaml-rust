@@ -53,6 +53,8 @@ pub enum Yaml {
     Alias(usize),
     /// Comment, Inline
     Comment(string::String, bool),
+    /// Meta operation (set emitter formatting options)
+    Meta(Meta),
     /// YAML null, e.g. `null` or `~`.
     Null,
     /// Accessing a nonexistent node via the Index trait returns `BadValue`.
@@ -63,6 +65,31 @@ pub enum Yaml {
 
 pub type Array = Vec<Yaml>;
 pub type Hash = LinkedHashMap<Yaml, Yaml>;
+
+#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Eq, Ord, Hash)]
+pub enum IntegerFormat {
+    /// Integer in binary zero padded to the given width.
+    Binary(u32),
+    /// Integer in decimal.
+    Decimal,
+    /// Integer in hexadecimal zero padded to the given width.
+    Hex(u32),
+    /// Integer in octal zero padded to the given width.
+    Octal(u32),
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Eq, Ord, Hash)]
+pub enum StringFormat {
+    Standard,
+    Quoted,
+    Block,
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Debug, Eq, Ord, Hash)]
+pub enum Meta {
+    Integer(IntegerFormat, Box<Yaml>),
+    String(StringFormat, Box<Yaml>),
+}
 
 // parse f64 as Core schema
 // See: https://github.com/chyh1990/yaml-rust/issues/51
