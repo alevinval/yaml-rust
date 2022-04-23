@@ -2,7 +2,10 @@ pub use self::error::EmitError;
 use self::funcs::escape_str;
 use self::funcs::need_quotes;
 use crate::yaml::Hash;
-use crate::yaml::{IntegerFormat, Meta, StringFormat, Yaml};
+use crate::yaml::IntegerFormat;
+use crate::yaml::Meta;
+use crate::yaml::StringFormat;
+use crate::yaml::Yaml;
 use std::fmt;
 
 mod error;
@@ -110,14 +113,14 @@ impl<'a> YamlEmitter<'a> {
             Meta::Integer(f, node) => {
                 let old = self.intformat;
                 self.intformat = *f;
-                let res = self.emit_node(&node);
+                let res = self.emit_node(node);
                 self.intformat = old;
                 res
             }
             Meta::String(f, node) => {
                 let old = self.strformat;
                 self.strformat = *f;
-                let res = self.emit_node(&node);
+                let res = self.emit_node(node);
                 self.strformat = old;
                 res
             }
@@ -175,34 +178,34 @@ impl<'a> YamlEmitter<'a> {
         let mut i = BUFSZ;
         let mut value = value as u64;
         loop {
-            i = i - 1;
+            i -= 1;
             match value % base {
                 x if x < 10 => s[i] = b'0' + (x as u8),
                 x => s[i] = b'A' + x as u8 - 10,
             };
-            value = value / base;
+            value /= base;
             if value == 0 {
                 break;
             }
         }
         while BUFSZ - i < width {
-            i = i - 1;
+            i -= 1;
             s[i] = b'0';
         }
         match self.intformat {
             IntegerFormat::Binary(_) => {
-                i = i - 2;
+                i -= 2;
                 s[i] = b'0';
                 s[i + 1] = b'b';
             }
             IntegerFormat::Hex(_) => {
-                i = i - 2;
+                i -= 2;
                 s[i] = b'0';
                 s[i + 1] = b'x';
             }
             IntegerFormat::Octal(_) => {
                 if s[i] != b'0' {
-                    i = i - 1;
+                    i -= 1;
                     s[i] = b'0';
                 }
             }
