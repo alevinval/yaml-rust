@@ -95,7 +95,10 @@ impl<'a> YamlEmitter<'a> {
             Yaml::Comment(ref comment, inline) => {
                 match inline {
                     true => write!(self.writer, " #{}", comment)?,
-                    false => write!(self.writer, "#{}", comment)?,
+                    false => {
+                        writeln!(self.writer, "#{}", comment)?;
+                        self.emit_indent()?;
+                    }
                 }
                 Ok(())
             }
@@ -110,6 +113,12 @@ impl<'a> YamlEmitter<'a> {
 
     fn process_meta(&mut self, op: &'a Meta) -> EmitResult {
         match op {
+            Meta::Fragment(frag) => {
+                for f in frag {
+                    self.emit_node(f)?;
+                }
+                Ok(())
+            }
             Meta::Integer(f, node) => {
                 let old = self.intformat;
                 self.intformat = *f;
@@ -124,6 +133,7 @@ impl<'a> YamlEmitter<'a> {
                 self.strformat = old;
                 res
             }
+            Meta::Int128(val) => self.emit_i128(*val),
         }
     }
 
@@ -161,22 +171,25 @@ impl<'a> YamlEmitter<'a> {
     }
 
     fn emit_integer(&mut self, value: i64) -> EmitResult {
-        let (width, base) = match self.intformat {
-            IntegerFormat::Binary(w) => (w as usize, 2),
+        const BUFSZ: usize = 64 + 2;
+        let (bits, width, base) = match self.intformat {
+            IntegerFormat::Binary(bits, w) => (bits, w as usize, 2),
             IntegerFormat::Decimal => {
                 write!(self.writer, "{}", value)?;
                 return Ok(());
             }
-            IntegerFormat::Hex(w) => (w as usize, 16),
-            IntegerFormat::Octal(w) => (w as usize, 8),
+            IntegerFormat::Hex(bits, w) => (bits, w as usize, 16),
+            IntegerFormat::Octal(bits, w) => (bits, w as usize, 8),
         };
-        if width > 64 {
+        if width > BUFSZ - 2 {
             return Err(EmitError::IntFmtWidth);
         }
-        const BUFSZ: usize = 66;
         let mut s = [b' '; BUFSZ];
         let mut i = BUFSZ;
         let mut value = value as u64;
+        if bits < 64 {
+            value &= (1u64 << bits) - 1;
+        }
         loop {
             i -= 1;
             match value % base {
@@ -193,17 +206,74 @@ impl<'a> YamlEmitter<'a> {
             s[i] = b'0';
         }
         match self.intformat {
-            IntegerFormat::Binary(_) => {
+            IntegerFormat::Binary(_, _) => {
                 i -= 2;
                 s[i] = b'0';
                 s[i + 1] = b'b';
             }
-            IntegerFormat::Hex(_) => {
+            IntegerFormat::Hex(_, _) => {
                 i -= 2;
                 s[i] = b'0';
                 s[i + 1] = b'x';
             }
-            IntegerFormat::Octal(_) => {
+            IntegerFormat::Octal(_, _) => {
+                i -= 2;
+                s[i] = b'0';
+                s[i + 1] = b'o';
+            }
+            IntegerFormat::Decimal => {}
+        };
+        write!(self.writer, "{}", std::str::from_utf8(&s[i..]).unwrap())?;
+        Ok(())
+    }
+
+    fn emit_i128(&mut self, value: i128) -> EmitResult {
+        const BUFSZ: usize = 128 + 2;
+        let (bits, width, base) = match self.intformat {
+            IntegerFormat::Binary(bits, w) => (bits, w as usize, 2),
+            IntegerFormat::Decimal => {
+                write!(self.writer, "{}", value)?;
+                return Ok(());
+            }
+            IntegerFormat::Hex(bits, w) => (bits, w as usize, 16),
+            IntegerFormat::Octal(bits, w) => (bits, w as usize, 8),
+        };
+        if width > BUFSZ - 2 {
+            return Err(EmitError::IntFmtWidth);
+        }
+        let mut s = [b' '; BUFSZ];
+        let mut i = BUFSZ;
+        let mut value = value as u128;
+        if bits < 128 {
+            value &= (1u128 << bits) - 1;
+        }
+        loop {
+            i -= 1;
+            match value % base {
+                x if x < 10 => s[i] = b'0' + (x as u8),
+                x => s[i] = b'A' + x as u8 - 10,
+            };
+            value /= base;
+            if value == 0 {
+                break;
+            }
+        }
+        while BUFSZ - i < width {
+            i -= 1;
+            s[i] = b'0';
+        }
+        match self.intformat {
+            IntegerFormat::Binary(_, _) => {
+                i -= 2;
+                s[i] = b'0';
+                s[i + 1] = b'b';
+            }
+            IntegerFormat::Hex(_, _) => {
+                i -= 2;
+                s[i] = b'0';
+                s[i + 1] = b'x';
+            }
+            IntegerFormat::Octal(_, _) => {
                 if s[i] != b'0' {
                     i -= 1;
                     s[i] = b'0';
@@ -240,7 +310,12 @@ impl<'a> YamlEmitter<'a> {
                 self.emit_node(entry)?;
                 continue;
             }
-
+            let entry = if let Some(f) = entry.get_comment_fragment() {
+                self.emit_node(&f[0])?;
+                &f[1]
+            } else {
+                entry
+            };
             write!(self.writer, "-")?;
             self.emit_value(true, entry)?;
 
@@ -474,6 +549,9 @@ a:
     fn yaml_integer(v: i64, f: IntegerFormat) -> Yaml {
         Yaml::Meta(Meta::Integer(f, Yaml::Integer(v).into()))
     }
+    fn yaml_i128(v: i128, f: IntegerFormat) -> Yaml {
+        Yaml::Meta(Meta::Integer(f, Yaml::Meta(Meta::Int128(v)).into()))
+    }
     fn yaml_dump(doc: &Yaml) -> String {
         let mut writer = String::new();
         let mut emitter = YamlEmitter::new(&mut writer);
@@ -485,19 +563,22 @@ a:
     fn test_integer_bases_simple() {
         let expected = r#"---
 dec: 10
-bin: 0b1010
-hex: 0xA
-oct: 012"#;
+bin: 0b10
+hex: 0x10
+oct: 0o10"#;
         let mut hash = Hash::new();
         hash.insert(yaml_string("dec"), yaml_integer(10, IntegerFormat::Decimal));
         hash.insert(
             yaml_string("bin"),
-            yaml_integer(10, IntegerFormat::Binary(0)),
+            yaml_integer(2, IntegerFormat::Binary(32, 0)),
         );
-        hash.insert(yaml_string("hex"), yaml_integer(10, IntegerFormat::Hex(0)));
+        hash.insert(
+            yaml_string("hex"),
+            yaml_integer(16, IntegerFormat::Hex(32, 0)),
+        );
         hash.insert(
             yaml_string("oct"),
-            yaml_integer(10, IntegerFormat::Octal(0)),
+            yaml_integer(8, IntegerFormat::Octal(32, 0)),
         );
         let result = yaml_dump(&Yaml::Hash(hash));
         assert_eq!(expected, result);
@@ -508,19 +589,74 @@ oct: 012"#;
         let expected = r#"---
 bin: 0b00001111
 hex: 0x0000ABCD
-oct: 0666"#;
+oct: 0o666"#;
         let mut hash = Hash::new();
         hash.insert(
             yaml_string("bin"),
-            yaml_integer(15, IntegerFormat::Binary(8)),
+            // 32-bit integer padded to 8 palces.
+            yaml_integer(15, IntegerFormat::Binary(32, 8)),
         );
         hash.insert(
             yaml_string("hex"),
-            yaml_integer(0xABCD, IntegerFormat::Hex(8)),
+            // 32-bit integer padded to 8 palces.
+            yaml_integer(0xABCD, IntegerFormat::Hex(32, 8)),
         );
         hash.insert(
             yaml_string("oct"),
-            yaml_integer(0o666, IntegerFormat::Octal(3)),
+            // 32-bit integer padded to 3 palces.
+            yaml_integer(0o666, IntegerFormat::Octal(32, 3)),
+        );
+        let result = yaml_dump(&Yaml::Hash(hash));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_integer_bases_negative() {
+        let expected = r#"---
+bin: 0b11110000
+hex: 0xFFFFFFFE
+oct: 0o177771"#;
+        let mut hash = Hash::new();
+        hash.insert(
+            yaml_string("bin"),
+            // 8-bit integer, padded to 8 places.
+            yaml_integer(-16, IntegerFormat::Binary(8, 8)),
+        );
+        hash.insert(
+            yaml_string("hex"),
+            // 32-bit integer, padded to 8 places.
+            yaml_integer(-2, IntegerFormat::Hex(32, 8)),
+        );
+        hash.insert(
+            yaml_string("oct"),
+            // 16-bit integer, padded to 8 places; should use more than 3
+            // spaces because of leading 1-bits.
+            yaml_integer(-7, IntegerFormat::Octal(16, 3)),
+        );
+        let result = yaml_dump(&Yaml::Hash(hash));
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn test_integer_128() {
+        let expected = r#"---
+dec: 10
+bin: 0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000001
+hex: 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF80
+oct: 0234200"#;
+        let mut hash = Hash::new();
+        hash.insert(yaml_string("dec"), yaml_i128(10, IntegerFormat::Decimal));
+        hash.insert(
+            yaml_string("bin"),
+            yaml_i128(65537, IntegerFormat::Binary(128, 128)),
+        );
+        hash.insert(
+            yaml_string("hex"),
+            yaml_i128(-128, IntegerFormat::Hex(128, 0)),
+        );
+        hash.insert(
+            yaml_string("oct"),
+            yaml_i128(80000, IntegerFormat::Octal(128, 0)),
         );
         let result = yaml_dump(&Yaml::Hash(hash));
         assert_eq!(expected, result);
